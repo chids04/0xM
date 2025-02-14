@@ -12,6 +12,8 @@
     "@astrojs/node": "^9.0.2",
     "@tailwindcss/vite": "^4.0.3",
     "astro": "^5.2.3",
+    "firebase": "^11.3.0",
+    "firebase-admin": "^13.1.0",
     "tailwindcss": "^4.0.3"
   }
 }

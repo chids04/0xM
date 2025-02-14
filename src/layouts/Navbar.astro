@@ -1,0 +1,71 @@
+---
+import "../styles/global.css"
+---
+
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width" />
+		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+		<meta name="generator" content={Astro.generator} />
+		<title>Astro Basics</title>
+	</head>
+	<body>
+        <div class="sidebar-layout">
+            <aside class="sidebar">
+              <div class="logo">Program Logo</div>
+              <nav>
+                <ul>
+                  <li><a href="/account">Account</a></li>
+                  <li><a href="/personal-milestones">Personal Milestones</a></li>
+                  <li><a href="/shared-milestones">Shared Milestones</a></li>
+                </ul>
+              </nav>
+            </aside>
+            <main class="content">
+		        <slot />
+            </main>
+          </div>
+        
+	</body>
+</html>
+
+<style>
+    .sidebar-layout {
+    display: flex;
+    height: 100vh;
+  }
+
+  .sidebar {
+    width: 250px;
+    background-color: #f4f4f4;
+    padding: 20px;
+    border-right: 1px solid #ccc;
+  }
+
+  .sidebar .logo {
+    font-size: 24px;
+    font-weight: bold;
+    margin-bottom: 20px;
+  }
+
+  .sidebar nav ul {
+    list-style: none;
+    padding: 0;
+  }
+
+  .sidebar nav ul li {
+    margin-bottom: 10px;
+  }
+
+  .sidebar nav ul li a {
+    text-decoration: none;
+    color: #333;
+  }
+
+  .content {
+    flex-grow: 1;
+    padding: 20px;
+  }
+</style>
