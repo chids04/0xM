@@ -1,6 +1,7 @@
 import type { APIRoute } from "astro";
 import { getAuth } from "firebase-admin/auth";
 import { app } from "../../../firebase/server";
+import { ethers } from "ethers";
 
 export const POST: APIRoute = async ({ request, redirect }) => {
   const auth = getAuth(app);
@@ -25,6 +26,11 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       password,
       displayName: name,
     });
+
+    const wallet = ethers.Wallet.createRandom();
+    const walletAddress = wallet.address;
+    console.log("Generated wallet address: ", walletAddress);
+    
   } catch (error: any) {
     console.log(error)
     return new Response(

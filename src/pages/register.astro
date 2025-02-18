@@ -3,15 +3,92 @@ import Layout from "../layouts/Layout.astro";
 ---
 
 <Layout title="Register">
-  <h1>Register</h1>
-  <p>Already have an account? <a href="/signin">Sign in</a></p>
-  <form action="/api/auth/register" method="post">
-    <label for="name">Name</label>
-    <input type="text" name="name" id="name" />
-    <label for="email" for="email">Email</label>
-    <input type="email" name="email" id="email" />
-    <label for="password">Password</label>
-    <input type="password" name="password" id="password" />
-    <button type="submit">Login</button>
-  </form>
+  <div class="card">
+    <h1>Register</h1>
+    <p>Already have an account? <a href="/signin"><strong>Sign in</strong></a></p>
+    <form action="/api/auth/register" method="post">
+      <label for="name">Name</label>
+      <input type="text" name="name" id="name" />
+      <label for="email">Email</label>
+      <input type="email" name="email" id="email" />
+      <label for="password">Password</label>
+      <input type="password" name="password" id="password" />
+      <button type="submit">Register</button>
+    </form>
+  </div>
 </Layout>
+
+<style>
+  .card {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    max-width: 400px;
+    margin: 50px auto;
+    padding: 20px;
+    text-align: center;
+    border: 1px solid black; /* Outline */
+  }
+
+  .card h1 {
+    margin-bottom: 10px;
+  }
+
+  .card p {
+    margin-bottom: 20px;
+  }
+
+  .card form {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .card label {
+    margin-bottom: 5px;
+    text-align: left;
+    width: 100%;
+  }
+
+  .card input {
+    margin-bottom: 15px;
+    padding: 10px;
+    width: 100%;
+    max-width: 300px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+  }
+
+  .card button[type="submit"] {
+    margin-bottom: 20px;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 4px;
+    background-color: #007bff;
+    color: white;
+    cursor: pointer;
+  }
+
+  @media (max-width: 600px) {
+    .card {
+      margin: 20px;
+      padding: 15px;
+    }
+
+    .card h1 {
+      font-size: 24px;
+    }
+
+    .card p {
+      font-size: 14px;
+    }
+
+    .card input {
+      max-width: 100%;
+    }
+
+    .card button[type="submit"] {
+      width: 100%;
+    }
+  }
+</style>

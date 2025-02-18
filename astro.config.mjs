@@ -9,10 +9,12 @@ import node from "@astrojs/node";
 export default defineConfig({
   output: "server",
   vite: {
-      plugins: [tailwindcss()],
+      plugins: [tailwindcss({applyBaseStyles: false,})],
   },
 
   adapter: node({
     mode: "standalone",
   }),
+
+
 });

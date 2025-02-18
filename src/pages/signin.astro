@@ -10,11 +10,16 @@ import appleLogo from "../assets/login_icons/apple.png"
 
 /* Check if the user is authenticated */
 const auth = getAuth(app);
-if (Astro.cookies.has("__session")) {
-  const sessionCookie = Astro.cookies.get("__session").value;
-  const decodedCookie = await auth.verifySessionCookie(sessionCookie);
-  if (decodedCookie) {
+
+// get session cookie.
+const sessionCookie = Astro.cookies.get("__session")?.value;
+
+if(sessionCookie){
+  try{
+    const decodedCookie = await auth.verifySessionCookie(sessionCookie);
     return Astro.redirect("/dashboard");
+  }
+  catch (error) {
   }
 }
 ---
