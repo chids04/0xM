@@ -9,7 +9,7 @@ import node from "@astrojs/node";
 export default defineConfig({
   output: "server",
   vite: {
-      plugins: [tailwindcss({applyBaseStyles: false,})],
+      plugins: [tailwindcss()],
   },
 
   adapter: node({
