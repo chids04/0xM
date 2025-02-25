@@ -27,10 +27,6 @@ export const POST: APIRoute = async ({ request, redirect }) => {
       displayName: name,
     });
 
-    const wallet = ethers.Wallet.createRandom();
-    const walletAddress = wallet.address;
-    console.log("Generated wallet address: ", walletAddress);
-    
   } catch (error: any) {
     console.log(error)
     return new Response(

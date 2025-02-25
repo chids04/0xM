@@ -1,6 +1,9 @@
 import type { ServiceAccount } from "firebase-admin";
 import { initializeApp, cert, getApps } from "firebase-admin/app";
 
+process.env['FIRESTORE_EMULATOR_HOST'] = 'localhost:8080';
+process.env['FIREBASE_AUTH_EMULATOR_HOST'] = 'localhost:9099';
+
 const activeApps = getApps();
 
 const { privateKey } = JSON.parse(import.meta.env.FIREBASE_PRIVATE_KEY)
@@ -26,8 +29,9 @@ const initApp = () => {
   }
   console.info('Loading service account from env.')
   return initializeApp({
-    credential: cert(serviceAccount as ServiceAccount)
+      credential: cert(serviceAccount as ServiceAccount)
   })
 }
 
+//export const app = initializeApp({projectId: 'milestone-tracker-15187'})
 export const app = activeApps.length === 0 ? initApp() : activeApps[0];

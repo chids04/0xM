@@ -1,0 +1,79 @@
+---
+//import { createWallet } from '../lib/wallet'; // Import the wallet creation function
+
+const { user } = Astro.props; // Pass the user object as a prop
+---
+
+<div id="create-wallet-modal" data-user={user} style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.5); display: none; justify-content: center; align-items: center; z-index: 1000;">
+  <div style="background: white; padding: 2rem; border-radius: 8px; text-align: center;">
+    <p>Creating wallet...</p>
+    <button id="create-wallet-button">Create Wallet</button>
+  </div>
+</div>
+
+<script>
+
+    const container = document.getElementById('create-wallet-modal')
+    const userId: string | undefined = container?.dataset.user
+
+    if(userId){
+        const hasWallet = await userHasWallet(userId)
+        
+        if(!hasWallet){
+            const walletCreated = await handleCreateWallet(userId)
+
+            if(walletCreated){
+                const modal = document.getElementById('create-wallet-modal');
+                if(modal){
+                    modal.style.display = 'none'
+                }
+            }
+
+        }
+    }
+    else{
+        //allow user to navigate but cant make any milestones
+        console.log("error checking wallet, skipping wallet creation for now")
+    }
+    /**
+     * Check if the user has a wallet.
+     * @returns {Promise<boolean>}
+     */
+
+    async function userHasWallet(id: string): Promise<boolean> {
+        const response = await fetch('/api/wallet/check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid: id }),
+        });
+
+        if (!response.ok) {
+        throw new Error('Failed to check wallet status.');
+        }
+
+        const data = await response.json();
+        return data.hasWallet;
+    }
+
+    /**
+     * Handle wallet creation for the user.
+     */
+
+    async function handleCreateWallet(id: string): Promise<boolean> {
+        try {
+            const response = await fetch('/api/wallet/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uid: id }),
+            });
+
+            if (response.ok) {
+                return true
+            }
+        } catch (error) {
+            console.error('Error creating wallet:', error);
+        }
+
+        return false
+    }
+</script>
