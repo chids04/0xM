@@ -1,0 +1,30 @@
+---
+const { errors } = Astro.props;
+
+//console.log(errors)
+---
+<div id="error-container" class="error-container">
+    <p>{errors}</p>
+</div>
+
+<style>
+    .error-container {
+        position: fixed;
+        bottom: 100px; /* Hidden initially off-screen */
+        left: 50%;
+        transform: translateX(-50%);
+        background-color: #f44336; /* Error red */
+        color: white;
+        text-align: center;
+        padding: 1rem;
+        border-radius: 8px;
+        transition: bottom 0.5s ease-in-out;
+        z-index: 1000;
+    }
+
+    .error-container.show {
+        bottom: 20vh; /* Slide up to 20% of the viewport height */
+    }
+</style>
+
+

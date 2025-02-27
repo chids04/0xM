@@ -6,10 +6,13 @@ import { getFirestore } from "firebase-admin/firestore";
 const ENCRYPTION_KEY: string = import.meta.env.ENCRYPTION_KEY
 
 if(!ENCRYPTION_KEY){
-    throw new Error("missing encryption key")
+    throw new Error("missing encryption key");
 }
 
 const IV: string = import.meta.env.ENCRYPTION_IV;
+if(!IV){
+  throw new Error("missing initalization vector");
+}
 
 /**
  * Encrypts a private key using AES-256-CBC encryption.
@@ -37,33 +40,38 @@ function encryptPrivateKey(privateKey: string): string {
   }
   
 export const POST: APIRoute = async ({ request }) => {
-    const db = getFirestore()
+  try {
+    const db = getFirestore();
+    const body = await request.json();
+    const userId = body?.uid;
 
-    try {
-      const body = await request.json();
-      const userId = body?.uid;
-  
-      if (!userId) {
-        return new Response("Missing user ID", { status: 400 });
-      }
-  
-      // Create a random Ethereum wallet
-      const wallet = ethers.Wallet.createRandom();
-      const publicKey = wallet.address;
-  
-      // Store wallet in Firestore (or your chosen database)
-      await db.collection("users").doc(userId).collection("wallet").doc("wallet_info").set({
-        publicKey,
-        encryptedPrivateKey: encryptPrivateKey(wallet.privateKey), // Use proper encryption!
-      });
-  
-      return new Response(
-        JSON.stringify({ success: true, publicKey }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      );
-    } catch (error) {
-      console.error("Error creating wallet:", error);
-      return new Response("Failed to create wallet", { status: 500 });
+    if (!userId) {
+      return new Response("Missing user ID", { status: 400 });
     }
-  };
-  
+
+    // Create a random Ethereum wallet
+    const wallet = ethers.Wallet.createRandom();
+    const publicKey = wallet.address;
+
+    // Store wallet in Firestore
+    await db.collection("users").doc(userId).collection("wallet").doc("wallet_info").set({
+      publicKey,
+      encryptedPrivateKey: encryptPrivateKey(wallet.privateKey),
+    });
+
+    return new Response(
+      JSON.stringify({ success: true, publicKey }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  } catch (error) {
+    console.error("Error in wallet creation process:", error);
+    // You can check for specific error types if needed
+    if (error instanceof Error) {
+      if (error.message.includes("Encryption key must be 32 bytes") || 
+          error.message.includes("IV must be 16 bytes")) {
+        return new Response("Configuration error", { status: 500 });
+      }
+    }
+    return new Response("Failed to create wallet", { status: 500 });
+  }
+};

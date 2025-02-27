@@ -7,16 +7,18 @@ export const POST: APIRoute = async ({ request, redirect }) => {
   const auth = getAuth(app);
 
   /* Get form data */
-  const formData = await request.formData();
-  const email = formData.get("email")?.toString();
-  const password = formData.get("password")?.toString();
-  const name = formData.get("name")?.toString();
+  const formData = await request.json();
+  const email = formData.email;
+  const password = formData.password;
+  const name = formData.name;
 
   if (!email || !password || !name) {
-    return new Response(
-      "Missing form data",
-      { status: 400 }
-    );
+    return new Response(JSON.stringify({ message: "Missing user, email or password" }), {
+      status: 400,
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
   }
 
   /* Create user */
@@ -29,10 +31,19 @@ export const POST: APIRoute = async ({ request, redirect }) => {
 
   } catch (error: any) {
     console.log(error)
-    return new Response(
-      "Something went wrong",
-      { status: 400 }
-    );
+    const errorMessage = error.message || "Something went wrong";
+    return new Response(JSON.stringify({ message: errorMessage }), {
+      status: 500,
+      headers: {
+        "Content-Type": "application/json",
+      },
+    }); 
   }
-  return redirect("/signin");
+
+  return new Response(JSON.stringify({ message: "User created successfully" }), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
 };

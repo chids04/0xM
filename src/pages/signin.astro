@@ -1,17 +1,14 @@
 ---
 import { app } from "../firebase/server";
 import { getAuth } from "firebase-admin/auth";
-
 import Layout from "../layouts/Layout.astro";
+import { ProfileForm } from "@/components/react/LoginForm"
 
-import fbLogo  from "../assets/login_icons/facebook.png"
-import googleLogo from "../assets/login_icons/google.png"
-import appleLogo from "../assets/login_icons/apple.png"
+import fbLogo from "../assets/login_icons/facebook.png";
+import googleLogo from "../assets/login_icons/google.png";
+import appleLogo from "../assets/login_icons/apple.png";
 
-/* Check if the user is authenticated */
 const auth = getAuth(app);
-
-// get session cookie.
 const sessionCookie = Astro.cookies.get("__session")?.value;
 
 if(sessionCookie){
@@ -20,84 +17,48 @@ if(sessionCookie){
     return Astro.redirect("/dashboard");
   }
   catch (error) {
+    // If verification fails, allow the page to render.
   }
 }
 ---
 
 <Layout title="Sign in">
-  <div class="card">
-    <h1>Sign in</h1>
-    <p>New here? <a href="/register"><strong>Create an account</strong></a></p>
-    <form action="/api/auth/signin" method="post">
-      <label for="email">Email</label>
-      <input type="email" name="email" id="email" />
-      <label for="password">Password</label>
-      <input type="password" name="password" id="password" />
-      <button type="submit">Login</button>
-    </form>
+ 
+    <div class="min-h-screen flex items-center justify-center bg-[#0e0e0e]">
+      <div class="w-full max-w-md p-8 space-y-8 bg-[#1f1f1f] rounded-lg shadow-lg">
+        <h1 class="text-center text-white font-bold mb-2 text-2xl">Sign In</h1>
 
-    <button id="google" class="fb-material-button">
-      <img src={googleLogo.src} alt="Google logo" />
-    </button>
+        <p class="text-center text-gray-300">
+        or <a href="/register" class="text-gray-500 hover:underline">register here</a>
+        </p>
 
-    <button id="facebook" class="fb-material-button">
-     <img src={fbLogo.src} alt="Facebook logo" />
-    </button>
-  </div>
+        <ProfileForm client:visible/>
+        
+        <div class="mt-6">
+          <div class="flex items-center">
+            <!-- Left divider -->
+            <div class="flex-grow border-t border-[#141313]"></div>
+            <!-- Separator text -->
+            <span class="mx-2 text-gray-300">or continue with</span>
+            <!-- Right divider -->
+            <div class="flex-grow border-t border-[#141313]"></div>
+          </div>
+          <div class="mt-4 space-y-4 flex flex-col items-center">
+            <!-- Google Sign In -->
+            <button id="google" class="">
+              <img src={googleLogo.src} alt="Google" class="mx-auto" />
+            </button>
+            <!-- Facebook Sign In -->
+            <button id="facebook" class="">
+              <img src={fbLogo.src} alt="Facebook" class="mx-auto" />
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
 </Layout>
 
-<style>
-  .card {
-    background: white;
-    border-radius: 8px;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-    max-width: 400px;
-    margin: 50px auto;
-    padding: 20px;
-    text-align: center;
-    border: 1px solid black;
-  }
-
-  .card h1 {
-    margin-bottom: 10px;
-  }
-
-  .card p {
-    margin-bottom: 20px;
-  }
-
-  .card form {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-  }
-
-  .card label {
-    margin-bottom: 5px;
-    text-align: left;
-    width: 100%;
-  }
-
-  .card input {
-    margin-bottom: 15px;
-    padding: 10px;
-    width: 100%;
-    max-width: 300px;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-  }
-
-  .card button[type="submit"] {
-    margin-bottom: 20px;
-    padding: 10px 20px;
-    border: none;
-    border-radius: 4px;
-    background-color: #007bff;
-    color: white;
-    cursor: pointer;
-  }
-
-</style>
 <script>
   import {
     getAuth,
@@ -110,105 +71,79 @@ if(sessionCookie){
   } from "firebase/auth";
   
   import { app } from "../firebase/client";
-
-  const auth = getAuth(app);
-
-  // This will prevent the browser from storing session data
-  auth.setPersistence(inMemoryPersistence);
-
-  const form = document.querySelector<HTMLFormElement>("form");
-  if (form){
-    form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const formData = new FormData(form);
-    const email = formData.get("email")?.toString();
-    const password = formData.get("password")?.toString();
-
-    if (!email || !password) {
-      return;
-    }
-
-    try {
-      const userCredential = await signInWithEmailAndPassword(
-        auth,
-        email,
-        password
-      );
-      const idToken = await userCredential.user.getIdToken();
-      const response = await fetch("/api/auth/signin", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ idToken }),
-      });
-
-      if (response.redirected) {
-        window.location.assign(response.url);
-      }
-    } catch (error) {
-      console.error("Error signing in with email and password:", error);
-    }
-
-    });
-  }
   
-
-  const gSignIn = document.querySelector<HTMLButtonElement>("#google");
-
+  const authClient = getAuth(app);
+  // Prevent session persistence (for demo purpose)
+  authClient.setPersistence(inMemoryPersistence);
+  
+  
+  const gSignIn = document.querySelector("#google");
   if(gSignIn){
     gSignIn.addEventListener("click", async () => {
       const provider = new GoogleAuthProvider();
       try {
-        const userCredential = await signInWithPopup(auth, provider);
+        const userCredential = await signInWithPopup(authClient, provider);
         const idToken = await userCredential.user.getIdToken();
-        const isNewUser = getAdditionalUserInfo(userCredential)?.isNewUser
-
+        const isNewUser = getAdditionalUserInfo(userCredential)?.isNewUser;
+  
         const res = await fetch("/api/auth/signin", {
           method: "POST",
           headers: {
-            "Content-Type" : "application/json",
-            Authorization: `Bearer ${idToken}`,
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${idToken}`
           },
-
-          body: JSON.stringify({ isNewUser })
-
+          body: JSON.stringify({ isNewUser }),
         });
-
+  
         if (res.redirected) {
           window.location.assign(res.url);
         }
+        else{
+          const errorMessage = await res.json();
+          alert("internal server error: " + errorMessage.message);
+        }
       } catch (error) {
-        console.error("Error signing in with Google:", error);
+        alert("internal server error: " + error);
       }
     });
   }
-
-  const fSignIn = document.querySelector<HTMLButtonElement>("#facebook");
+  
+  const fSignIn = document.querySelector("#facebook");
   if(fSignIn){
     fSignIn.addEventListener("click", async () => {
       const provider = new FacebookAuthProvider();
       try {
-        const userCredential = await signInWithPopup(auth, provider);
+        const userCredential = await signInWithPopup(authClient, provider);
         const idToken = await userCredential.user.getIdToken();
-        const isNewUser = getAdditionalUserInfo(userCredential)?.isNewUser
-
+        const isNewUser = getAdditionalUserInfo(userCredential)?.isNewUser;
+  
         const res = await fetch("/api/auth/signin", {
           method: "POST",
           headers: {
-            "Content-Type" : "application/json",
-            Authorization: `Bearer ${idToken}`,
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${idToken}`
           },
-          body: JSON.stringify({ isNewUser })
+          body: JSON.stringify({ isNewUser }),
         });
-
+  
         if (res.redirected) {
           window.location.assign(res.url);
         }
+        else{
+          const errorMessage = await res.json();
+          alert("internal server error: " + errorMessage.message);
+        }
       } catch (error) {
-        console.error("Error signing in with Facebook:", error);
+        alert("internal server error: " + error);
       }
     });
   }
-
+  
+  const aSignIn = document.querySelector("#apple");
+  if(aSignIn){
+    aSignIn.addEventListener("click", async () => {
+      // Implement Apple sign in if applicable
+      console.log("Apple sign in clicked");
+    });
+  }
 </script>

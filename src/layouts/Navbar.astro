@@ -12,6 +12,7 @@ import "../styles/global.css"
 		<title>Astro Basics</title>
 	</head>
 	<body>
+        <button id="toggle-nav" class="toggle-button">☰</button>
         <div class="sidebar-layout">
             <aside class="sidebar">
               <div class="logo">Program Logo</div>
@@ -48,6 +49,53 @@ import "../styles/global.css"
     display: flex;
     flex-direction: column;
     justify-content: space-between;
+    transition: width 0.3s ease, transform 0.3s ease;
+    
+  }
+
+  .toggle-button {
+    display: none;
+    position: fixed;
+    top: 50%;
+    left: 1rem;
+    z-index: 1000;
+    background: #007bff;
+    border: none;
+    color: white;
+    padding: 0.5rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: width 0.3s ease, transform 0.3s ease;
+
+  }
+
+  @media (max-width: 768px) {
+    .toggle-button {
+      display: block;
+      left:0;
+    }
+
+    .toggle-button.active {
+      transform: translateX(250px);
+    }
+
+    .sidebar {
+      position: fixed;
+      left: -250px;
+      height: 100vh;
+      z-index: 999;
+    }
+
+    .sidebar.active {
+      transform: translateX(250px);
+    }
+    
+
+    .content {
+      margin-left: 0;
+      width: 100%;
+    }
+
   }
 
   .sidebar .logo {
@@ -90,3 +138,27 @@ import "../styles/global.css"
     padding: 20px;
   }
 </style>
+
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    const toggleButton = document.getElementById('toggle-nav');
+    const sidebar = document.querySelector('.sidebar');
+
+    if (toggleButton && sidebar) {
+      toggleButton.addEventListener('click', (e) => {
+        //e.stopPropagation();
+        sidebar.classList.toggle('active');
+        toggleButton.classList.toggle('active');
+      });
+
+      // Close sidebar when clicking outside
+      document.addEventListener('click', (event) => {
+        const target = event.target as HTMLElement;
+        if (!target.closest('.sidebar') && !target.closest('.toggle-button')) {
+          sidebar.classList.remove('active');
+          toggleButton.classList.remove('active');
+        }
+      });
+    }
+  });
+</script>
