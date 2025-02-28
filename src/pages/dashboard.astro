@@ -4,42 +4,16 @@ import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 import Layout from "../layouts/Navbar.astro";  // Use the Navbar layout
 import WalletCreationModal from "../components/WalletCreationModal.astro";
+import { Card, CardHeader, CardContent } from "@/components/ui/card";
+import { UserCard } from "@/components/react/UserCard";
 
-const auth = getAuth(app);
-const db = getFirestore(app);
 
-const sessionCookie = Astro.cookies.get("__session")?.value;
-
-if (!sessionCookie) {
-  return Astro.redirect("/signin");
-}
-
-let user = null;
-
-try {
-  const decodedCookie = await auth.verifySessionCookie(sessionCookie);
-  user = await auth.getUser(decodedCookie.uid);
-  if (!user) {
-    return Astro.redirect("/signin");
-  }
-} catch (error) {
-  console.error("Error verifying session cookie:", error);
-  return Astro.redirect("/signin");
-}
 ---
 
 <Layout title="Dashboard">
-  <div class="p-4">
-    <h1 class="text-3xl font-bold text-gray-900 dark:text-white underline">
-      Welcome {user.displayName}
-    </h1>
-    <p class="mt-3 text-gray-700 dark:text-gray-300">
-      We are happy to see you here.
-    </p>
-    <div class="mt-6">
-      <WalletCreationModal user={user.uid} />
-    </div>
-  </div>
+      <h1 class="text-3xl font-bold text-white">
+        Dashboard
+      </h1>
 </Layout>
 
 
