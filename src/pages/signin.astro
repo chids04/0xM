@@ -8,6 +8,7 @@ import fbLogo from "../assets/login_icons/facebook.png";
 import googleLogo from "../assets/login_icons/google.png";
 import appleLogo from "../assets/login_icons/apple.png";
 
+//this for auto sign in, if there is still a valid session in the browser, should add option for this
 const auth = getAuth(app);
 const sessionCookie = Astro.cookies.get("__session")?.value;
 
@@ -136,14 +137,6 @@ if(sessionCookie){
       } catch (error) {
         alert("internal server error: " + error);
       }
-    });
-  }
-  
-  const aSignIn = document.querySelector("#apple");
-  if(aSignIn){
-    aSignIn.addEventListener("click", async () => {
-      // Implement Apple sign in if applicable
-      console.log("Apple sign in clicked");
     });
   }
 </script>

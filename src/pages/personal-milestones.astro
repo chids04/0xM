@@ -1,0 +1,192 @@
+---
+import Layout from "../layouts/Navbar.astro";  // Use the Navbar layout
+---
+
+<Layout title="Personal Milestones"> 
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-3xl font-bold text-white mb-6">Your Milestones</h1>
+        
+        <!-- Milestone Timeline Container - Make sure it has a defined height -->
+        <div class="relative h-[1400px] w-full my-10">
+            <!-- Guide line - vertical center -->
+            <div class="hidden lg:block absolute top-0 left-1/2 h-full w-0.5 bg-purple-500/30 transform -translate-x-1/2"></div>
+            
+            <!-- Milestones -->
+            <div class="milestone-container">
+                <!-- Milestone 1 -->
+                <div class="milestone-card" data-index="0">
+                    <div class="bg-[#1a1a1a] p-6 rounded-xl shadow-lg border border-purple-500/20 hover:border-purple-500/50 transition-all duration-300 hover:-translate-y-1 w-[280px]">
+                        <div class="absolute -top-3 -left-3 w-12 h-12 rounded-full bg-purple-500 flex items-center justify-center text-white font-bold shadow-lg">1</div>
+                        <h2 class="text-xl font-semibold mb-2 text-white">Project Kickoff</h2>
+                        <p class="text-gray-400 mb-4">Initial milestone to get your project started with proper documentation.</p>
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm text-gray-500">Due: Mar 15, 2025</span>
+                            <button class="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors">
+                                View Details
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Milestone 2 -->
+                <div class="milestone-card" data-index="1">
+                    <div class="bg-[#1a1a1a] p-6 rounded-xl shadow-lg border border-purple-500/20 hover:border-purple-500/50 transition-all duration-300 hover:-translate-y-1 w-[280px]">
+                        <div class="absolute -top-3 -left-3 w-12 h-12 rounded-full bg-purple-500 flex items-center justify-center text-white font-bold shadow-lg">2</div>
+                        <h2 class="text-xl font-semibold mb-2 text-white">Design Phase</h2>
+                        <p class="text-gray-400 mb-4">Complete wireframes and design mockups for the project.</p>
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm text-gray-500">Due: Apr 5, 2025</span>
+                            <button class="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors">
+                                View Details
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Milestone 3 -->
+                <div class="milestone-card" data-index="2">
+                    <div class="bg-[#1a1a1a] p-6 rounded-xl shadow-lg border border-purple-500/20 hover:border-purple-500/50 transition-all duration-300 hover:-translate-y-1 w-[280px]">
+                        <div class="absolute -top-3 -left-3 w-12 h-12 rounded-full bg-purple-500 flex items-center justify-center text-white font-bold shadow-lg">3</div>
+                        <h2 class="text-xl font-semibold mb-2 text-white">Frontend Development</h2>
+                        <p class="text-gray-400 mb-4">Complete the user interface implementation based on approved designs.</p>
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm text-gray-500">Due: May 10, 2025</span>
+                            <button class="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors">
+                                View Details
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Milestone 4 -->
+                <div class="milestone-card" data-index="3">
+                    <div class="bg-[#1a1a1a] p-6 rounded-xl shadow-lg border border-purple-500/20 hover:border-purple-500/50 transition-all duration-300 hover:-translate-y-1 w-[280px]">
+                        <div class="absolute -top-3 -left-3 w-12 h-12 rounded-full bg-purple-500 flex items-center justify-center text-white font-bold shadow-lg">4</div>
+                        <h2 class="text-xl font-semibold mb-2 text-white">Backend Integration</h2>
+                        <p class="text-gray-400 mb-4">Connect frontend components to backend services and APIs.</p>
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm text-gray-500">Due: June 20, 2025</span>
+                            <button class="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors">
+                                View Details
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Milestone 5 -->
+                <div class="milestone-card" data-index="4">
+                    <div class="bg-[#1a1a1a] p-6 rounded-xl shadow-lg border border-purple-500/20 hover:border-purple-500/50 transition-all duration-300 hover:-translate-y-1 w-[280px]">
+                        <div class="absolute -top-3 -left-3 w-12 h-12 rounded-full bg-purple-500 flex items-center justify-center text-white font-bold shadow-lg">5</div>
+                        <h2 class="text-xl font-semibold mb-2 text-white">Testing Phase</h2>
+                        <p class="text-gray-400 mb-4">Complete unit testing, integration testing and user acceptance testing.</p>
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm text-gray-500">Due: July 15, 2025</span>
+                            <button class="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors">
+                                View Details
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Milestone 6 -->
+                <div class="milestone-card" data-index="5">
+                    <div class="bg-[#1a1a1a] p-6 rounded-xl shadow-lg border border-purple-500/20 hover:border-purple-500/50 transition-all duration-300 hover:-translate-y-1 w-[280px]">
+                        <div class="absolute -top-3 -left-3 w-12 h-12 rounded-full bg-purple-500 flex items-center justify-center text-white font-bold shadow-lg">6</div>
+                        <h2 class="text-xl font-semibold mb-2 text-white">Beta Launch</h2>
+                        <p class="text-gray-400 mb-4">Initial release to a limited set of users for feedback collection.</p>
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm text-gray-500">Due: Aug 10, 2025</span>
+                            <button class="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors">
+                                View Details
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Milestone 7 -->
+                <div class="milestone-card" data-index="6">
+                    <div class="bg-[#1a1a1a] p-6 rounded-xl shadow-lg border border-purple-500/20 hover:border-purple-500/50 transition-all duration-300 hover:-translate-y-1 w-[280px]">
+                        <div class="absolute -top-3 -left-3 w-12 h-12 rounded-full bg-purple-500 flex items-center justify-center text-white font-bold shadow-lg">7</div>
+                        <h2 class="text-xl font-semibold mb-2 text-white">Full Launch</h2>
+                        <p class="text-gray-400 mb-4">Public release of the product with marketing campaign.</p>
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm text-gray-500">Due: Sept 5, 2025</span>
+                            <button class="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors">
+                                View Details
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</Layout>
+
+<style>
+    .milestone-container {
+        position: relative;
+        width: 100%;
+        height: 100%;
+    }
+    
+    .milestone-card {
+        position: absolute;
+        transition: all 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+        /* Only center horizontally, not vertically */
+        transform: translateX(-50%);
+    }
+</style>
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const milestones = document.querySelectorAll('.milestone-card');
+        const container = document.querySelector('.milestone-container');
+        const totalMilestones = milestones.length;
+        
+        // Function to update positions based on window width
+        const updatePositions = () => {
+            // Get container dimensions
+            const containerWidth = container.clientWidth;
+            const containerHeight = container.clientHeight;
+            
+            // Calculate responsive amplitude based on screen width
+            const maxAmplitude = containerWidth * 0.3; // 30% of container width for wide screens
+            const amplitude = Math.min(
+                maxAmplitude,
+                Math.max(20, (window.innerWidth - 480) / 4) // Gradually reduces amplitude as width decreases
+            );
+            
+            // Calculate space needed for each card and spacing
+            const cardHeight = 180; // Approximate height of a card
+            const totalSpacing = containerHeight - (cardHeight * totalMilestones);
+            const spaceBetweenCards = totalSpacing / (totalMilestones + 1);
+            
+            // Position each milestone
+            milestones.forEach((milestone, i) => {
+                const index = parseInt(milestone.getAttribute('data-index'));
+                
+                // Vertical position - calculate actual pixel position
+                // Add cardHeight/2 to account for the card being positioned from its top
+                const verticalPixels = spaceBetweenCards * (index + 1) + cardHeight * index + cardHeight/2;
+                
+                // Calculate position in the sine wave cycle (0 to 2π)
+                // We'll use 1.5 full cycles for 7 milestones
+                const sinePosition = (index / (totalMilestones - 1)) * Math.PI * 3;
+                
+                // Horizontal position based on sine wave
+                const horizontalOffset = Math.sin(sinePosition) * amplitude;
+                const horizontalPos = 0.5 + horizontalOffset / containerWidth; // Center is 0.5
+                
+                // Apply positions
+                milestone.style.top = `${verticalPixels}px`;
+                milestone.style.left = `${horizontalPos * 100}%`;
+            });
+        };
+        
+        // Initial positioning
+        updatePositions();
+        
+        // Update positions when window is resized
+        window.addEventListener('resize', updatePositions);
+    });
+</script>

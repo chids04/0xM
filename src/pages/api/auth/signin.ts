@@ -2,8 +2,6 @@ import type { APIRoute } from "astro";
 import { app } from "../../../firebase/server";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
-import { ethers } from "ethers";
-import crypto from "crypto"
 
 
 export const POST: APIRoute = async ({ request, cookies, redirect }) => {
@@ -42,5 +40,5 @@ export const POST: APIRoute = async ({ request, cookies, redirect }) => {
     path: "/",
   });
 
-  return redirect("/signin")
+  return redirect("/dashboard")
 };

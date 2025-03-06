@@ -27,7 +27,6 @@ import {
 } from "firebase/auth";
 
 const formSchema = z.object({
-  username: z.string().min(2, { message: "Username must be at least 2 characters." }),
   email: z.string().email({ message: "Invalid email address." }),
   password: z.string().min(6, { message: "Password must be at least 6 characters." }),
 })
@@ -75,7 +74,6 @@ async function onSubmit(values: z.infer<typeof formSchema>) {
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
-
         {/* Email Field */}
         <FormField
           control={form.control}
@@ -119,7 +117,7 @@ async function onSubmit(values: z.infer<typeof formSchema>) {
         {/* Submit Button */}
         <Button
           type="submit"
-          className="w-full bg-[#141313] text-white rounded-md hover:bg-[#111111] focus:outline-none focus:ring-2 focus:ring-gray-700"
+          className="w-full bg-[#141313] text-white rounded-md hover:bg-[#111111] outline-2 outline-gray-100 focus:outline-none "
         >
           login
         </Button>
