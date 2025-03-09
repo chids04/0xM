@@ -7,9 +7,6 @@ export const POST: APIRoute = async ({ request, cookies }) => {
   const auth = getAuth(app);
   const db = getFirestore(app);
 
-  const usersSnapshot = await db.collection("users").doc("B3WDT0hipv5jSdDBBaPZURhEGYha").collection("wallet").get();
-  console.log("Users found:", usersSnapshot.size);
-
   // verify session using the session cookie
   const sessionCookie = cookies.get("__session")?.value;
   if (!sessionCookie) {
@@ -35,7 +32,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
   const { targetEmail } = await request.json();
   if (!targetEmail) {
     return new Response(
-      JSON.stringify({ message: "Missing target user id" }),
+      JSON.stringify({ message: "Missing email" }),
       { status: 400, headers: { "Content-Type": "application/json" } }
     );
   }
@@ -53,15 +50,16 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     );
   }
 
-const targetUserId = "uh5KIklJYIPPv6qzYo7KNiuLFHhA"
-console.log(targetUserRecord.uid)
+  const targetUserId = targetUserRecord.uid
 
-// const usersSnapshot = await db.collection("users").get();
-// console.log("Users found:", usersSnapshot.size);
-// usersSnapshot.forEach(doc => console.log(doc.id));
+  if (senderUid === targetUserId) {
+    return new Response(
+      JSON.stringify({ message: "Cannot add yourself as a friend" }),
+      { status: 400, headers: { "Content-Type": "application/json" } }
+    );
+  }
 
-  console.log(targetUserId)
-  // Check if a user document exists for the target UID in the "users" collection
+  // check if a user document exists for the target UID in the users collection
   const targetUserDoc = await db.collection("users").doc(targetUserId).get();
   if (!targetUserDoc.exists) {
     return new Response(
@@ -70,16 +68,7 @@ console.log(targetUserRecord.uid)
     );
   }
 
-  // Prevent users from adding themselves
-  if (senderUid === targetUserId) {
-    return new Response(
-      JSON.stringify({ message: "Cannot add yourself as a friend" }),
-      { status: 400, headers: { "Content-Type": "application/json" } }
-    );
-  }
-
-  // Update the target user's pendingRequests array in their friends subcollection.
-  // Using set with merge:true creates the document if it does not exist.
+  // update the target user's pendingRequests array in their friends subcollection.
   try {
     await db
       .collection("users")
@@ -113,7 +102,7 @@ console.log(targetUserRecord.uid)
         { merge: true }
       );
   } catch (err) {
-    console.error("Error updating sentRequests:", err);
+    console.error("Error updating sent requests:", err);
     return new Response(
       JSON.stringify({ message: "Could not update sent requests" }),
       { status: 500, headers: { "Content-Type": "application/json" } }

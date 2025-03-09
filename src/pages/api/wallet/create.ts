@@ -3,6 +3,12 @@ import { ethers } from "ethers";
 import * as crypto from "crypto";
 import { getFirestore } from "firebase-admin/firestore";
 import { app } from "../../../firebase/server";
+import { getAuth } from "firebase-admin/auth";
+import { defineCollection } from "astro:content";
+import { datetimeRegex } from "astro:schema";
+
+
+//if a new user, we create a wallet key pair and store some user e-mail and account creation date
 
 const ENCRYPTION_KEY: string = import.meta.env.ENCRYPTION_KEY
 
@@ -43,6 +49,8 @@ function encryptPrivateKey(privateKey: string): string {
 export const POST: APIRoute = async ({ request }) => {
   try {
     const db = getFirestore(app);
+    const auth = getAuth(app);
+
     const body = await request.json();
     const userId = body?.uid;
 
@@ -50,32 +58,54 @@ export const POST: APIRoute = async ({ request }) => {
       return new Response("Missing user ID", { status: 400 });
     }
 
+    //get user email
+    let user_email;
+    try{
+      const user_rec = await auth.getUser(userId)
+      user_email = user_rec.email
+    }
+    catch(error){
+      if (error instanceof Error) {
+        console.log("error getting user email from firebase" + error.message);
+      }
+
+      return new Response("failed to get user from firebase", { status: 500 })
+    }
+
     // Create a random Ethereum wallet
     const wallet = ethers.Wallet.createRandom();
     const publicKey = wallet.address;
 
+    //batch the transactions so it is atomic, cant have user email and no wallet
+
+    const batch = db.batch()
+
+    const userRef = db.collection("users").doc(userId)
+    batch.set(userRef, {
+      email: user_email,
+      creationDate: new Date()
+    })
+
     // Store wallet in Firestore
-    await db.collection("users").doc(userId).collection("wallet").doc("wallet_info").set({
+    const walletRef = db.collection("users").doc(userId).collection("wallet").doc("wallet_info")
+    batch.set(walletRef, {
       publicKey,
       encryptedPrivateKey: encryptPrivateKey(wallet.privateKey),
     });
 
+    await batch.commit()
     
-  const usersSnapshot = await db.collection("users").get();
-  console.log("Users found:", usersSnapshot.size);
-  usersSnapshot.forEach(doc => console.log(doc.id));
-
     return new Response(
       JSON.stringify({ success: true, publicKey }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
   } catch (error) {
-    console.error("Error in wallet creation process:", error);
+    console.error("Error in user creation process:", error);
     // You can check for specific error types if needed
     if (error instanceof Error) {
       if (error.message.includes("Encryption key must be 32 bytes") || 
           error.message.includes("IV must be 16 bytes")) {
-        return new Response("Configuration error", { status: 500 });
+        return new Response("Server error", { status: 500 });
       }
     }
     return new Response("Failed to create wallet", { status: 500 });
