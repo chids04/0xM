@@ -10,8 +10,8 @@ interface UserCardProps {
 
 export function UserCard({ userName, photoURL, walletBalance = "0.00 ETH" }: UserCardProps) {
   return (
-    <Card className="w-48 bg-[#1f1f1f] border-[#333] text-white shadow-lg hover:shadow-xl transition-shadow duration-300">
-      <CardHeader className="flex flex-row items-center gap-2 py-1.5 px-2">
+    <Card className="bg-[#1f1f1f] border-[#333] text-white shadow-lg hover:shadow-xl transition-shadow duration-300 px-4 py-2">
+      <CardHeader className="flex flex-row items-center gap-2 py-1.5 px-0">
         <img
           src={photoURL}
           alt={`${userName}'s profile`}

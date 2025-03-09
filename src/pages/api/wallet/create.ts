@@ -2,6 +2,7 @@ import type { APIRoute } from "astro";
 import { ethers } from "ethers";
 import * as crypto from "crypto";
 import { getFirestore } from "firebase-admin/firestore";
+import { app } from "../../../firebase/server";
 
 const ENCRYPTION_KEY: string = import.meta.env.ENCRYPTION_KEY
 
@@ -41,7 +42,7 @@ function encryptPrivateKey(privateKey: string): string {
   
 export const POST: APIRoute = async ({ request }) => {
   try {
-    const db = getFirestore();
+    const db = getFirestore(app);
     const body = await request.json();
     const userId = body?.uid;
 
@@ -58,6 +59,11 @@ export const POST: APIRoute = async ({ request }) => {
       publicKey,
       encryptedPrivateKey: encryptPrivateKey(wallet.privateKey),
     });
+
+    
+  const usersSnapshot = await db.collection("users").get();
+  console.log("Users found:", usersSnapshot.size);
+  usersSnapshot.forEach(doc => console.log(doc.id));
 
     return new Response(
       JSON.stringify({ success: true, publicKey }),

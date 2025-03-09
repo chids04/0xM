@@ -1,7 +1,18 @@
 ---
-import Layout from "../layouts/Navbar.astro";  // Use the Navbar layout
+// filepath: src/pages/create-milestone.astro
+import Layout from "../layouts/Navbar.astro";
+import { MilestoneForm } from "@/components/react/MilestoneForm";
+
+const handleSubmit = (data) => {
+  console.log("Form Data in Astro Component:", data);
+  // You can now handle the form data here, e.g., send it to an API endpoint
+  // or perform other actions.
+};
 ---
 
 <Layout title="Create Milestone">
-
+  <div class="container mx-auto py-8">
+    <h1 class="text-2xl font-bold mb-4 text-white">Create a New Milestone</h1>
+    <MilestoneForm onSubmit={handleSubmit} />
+  </div>
 </Layout>

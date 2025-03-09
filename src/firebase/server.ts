@@ -34,4 +34,4 @@ const initApp = () => {
 }
 
 //export const app = initializeApp({projectId: 'milestone-tracker-15187'})
-export const app = activeApps.length === 0 ? initApp() : activeApps[0];
+export const app = activeApps.length === 0 ? initializeApp({projectId: 'milestone-tracker-15187'}) : activeApps[0];

@@ -1,8 +1,10 @@
 ---
 import Layout from "../layouts/Navbar.astro";  // Use the Navbar layout
+
+const user = await Astro.locals.user
 ---
 
-<Layout title="Personal Milestones"> 
+<Layout title="Personal Milestones" user = { user }> 
     <div class="container mx-auto px-4 py-8">
         <h1 class="text-3xl font-bold text-white mb-6">Your Milestones</h1>
         

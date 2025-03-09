@@ -7,15 +7,36 @@ import WalletCreationModal from "../components/WalletCreationModal.astro";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { UserCard } from "@/components/react/UserCard";
 
+// let user;
 
+// const auth = getAuth(app);
+// const sessionCookie = Astro.cookies.get("__session")?.value;
+
+// if (sessionCookie) {
+//   try {
+//     const decodedCookie = await auth.verifySessionCookie(sessionCookie);
+//     user = await auth.getUser(decodedCookie.uid);
+
+//   } catch (error) {
+//     console.error("Error verifying session cookie:", error);
+//     Astro.redirect("/signin")
+//   }
+// } else {
+//   console.error("No session cookie found")
+//   Astro.redirect("/signin")
+// }
+
+const user = Astro.locals.user
 ---
 
-<Layout title="Dashboard">
+<Layout title="Dashboard" user = {user}>
       <div class="text-center sm:text-left">
       <h1 class="font-bold text-white">
         Dashboard
       </h1>
       </div>
+
+      <WalletCreationModal user={user.uid} />
 </Layout>
 
 

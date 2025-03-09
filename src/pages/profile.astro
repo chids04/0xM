@@ -1,0 +1,92 @@
+---
+// filepath: src/pages/profile.astro
+import Layout from "../layouts/Navbar.astro";
+import { UserProfile } from "@/components/react/UserProfile";
+import { FriendRequestsList } from "@/components/react/FriendRequestsLists";
+import { FriendsList } from "@/components/react/FriendsList";
+import { AddFriend } from "@/components/react/AddFriend";  // import the AddFriend component
+
+import { getFirestore } from "firebase-admin/firestore";
+
+let userData = null;
+let friendRequests = [];
+let friends = [];
+const user = await Astro.locals.user;
+const db = getFirestore();
+
+if (user) {
+  userData = {
+    uid: user.uid,
+    displayName: user.displayName || "",
+    email: user.email || "",
+    photoURL: user.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${user.displayName || user.email}`,
+    bio: "",
+    location: "",
+    website: "",
+  };
+
+  // Merge additional profile details from Firestore if available.
+  const userDoc = await db.collection("users").doc(user.uid).get();
+  if (userDoc.exists) {
+    const data = userDoc.data();
+    userData = {
+      ...userData,
+      bio: data.bio || "",
+      location: data.location || "",
+      website: data.website || "",
+    };
+  }
+
+  // Retrieve Friend Requests (assumes a subcollection "friendRequests")
+  const requestsSnapshot = await db.collection("users").doc(user.uid).collection("friendRequests").get();
+  friendRequests = requestsSnapshot.docs.map((doc) => ({ uid: doc.id, ...doc.data() }));
+
+  // Retrieve Friends (assumes a subcollection "friends")
+  const friendsSnapshot = await db.collection("users").doc(user.uid).collection("friends").get();
+  friends = friendsSnapshot.docs.map((doc) => ({ uid: doc.id, ...doc.data() }));
+}
+---
+
+<Layout title="Profile">
+  <div class="container mx-auto py-8 px-4 space-y-8">
+    {userData ? (
+      <>
+        <!-- Profile Section -->
+        <section>
+          <h1 class="text-2xl font-bold text-white mb-4">Your Profile</h1>
+          <UserProfile client:load userData={userData} />
+        </section>
+
+        <!-- Friends List Section with Add Friend Button -->
+        <section>
+          <h2 class="text-xl font-bold text-white mb-4">Your Friends</h2>
+          <div class="flex">
+            <!-- Right Column: Friends List -->
+            <div class="w-2/3">
+              {friends.length > 0 ? (
+                <FriendsList client:load friends={friends} userId={userData.uid} />
+              ) : (
+                <p class="text-gray-400">You haven't added any friends yet.</p>
+              )}
+            </div>
+            <div class="w-1/3">
+              <AddFriend client:load userId={userData.uid} />
+            </div>
+          </div>
+        </section>
+
+        <!-- Friend Requests Section -->
+        <section>
+          <h2 class="text-xl font-bold text-white mb-4">Friend Requests</h2>
+          {friendRequests.length > 0 ? (
+            <FriendRequestsList client:load requests={friendRequests} userId={userData.uid} />
+          ) : (
+            <p class="text-gray-400">No pending friend requests.</p>
+          )}
+        </section>
+      </>
+    ) : (
+      <p class="text-gray-400">Loading profile...</p>
+    )}
+  </div>
+</Layout>

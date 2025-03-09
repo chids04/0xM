@@ -1,28 +1,38 @@
 import { defineMiddleware } from "astro:middleware";
+import { getAuth } from "firebase-admin/auth";
+import { app } from "./firebase/server"
 
-export const onRequest = defineMiddleware((context, next) => {
+export const onRequest = defineMiddleware(async (context, next) => {
     const { url, cookies } = context;
   
-    // only check session cookie on the dashboard
+    // only check session cookie on routes that need authorization
     // will conditionally add when other transactions
-    const publicRoutes = ['/dashboard'];
+    try{
+    const publicRoutes = ['/dashboard', '/profile', '/personal-milestones'];
     if (!publicRoutes.includes(url.pathname)) {
       return next();
     }
   
     // Check authentication
+    const auth = getAuth(app);
     const sessionCookie = cookies.get('__session')?.value;
-  
+ 
     if (!sessionCookie) {
       // Redirect to sign-in page if not authenticated
-      return new Response(null, {
-        status: 302,
-        headers: {
-          'Location': '/signin',
-        },
-      });
+      return context.redirect("/signin")
+    }
+    const verifiedCookie = await auth.verifySessionCookie(sessionCookie);
+
+    if(!verifiedCookie){
+      return context.redirect("/signin")
+    }
+    
+    //if here then verfied, set user prop to be passed
+    context.locals.user = await auth.getUser(verifiedCookie.uid);
+    } catch(error){
+
+      return context.redirect("/signin")
     }
   
-    // If authenticated, proceed to the route
     return next();
   })
