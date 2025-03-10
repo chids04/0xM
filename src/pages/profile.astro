@@ -5,14 +5,30 @@ import { UserProfile } from "@/components/react/UserProfile";
 import { FriendRequestsList } from "@/components/react/FriendRequestsLists";
 import { FriendsList } from "@/components/react/FriendsList";
 import { AddFriend } from "@/components/react/AddFriend";  // import the AddFriend component
+import { app } from "../firebase/server"
 
 import { getFirestore } from "firebase-admin/firestore";
+import { getAuth } from "firebase-admin/auth";
 
 let userData = null;
-let friendRequests = [];
-let friends = [];
+let friendRequestsIds: string[] = [];
+let friends: string[] = [];
+interface FriendRequest {
+  uid: string;
+  displayName: string;
+  photoURL: string;
+  timestamp: {
+    toDate: () => Date;
+    seconds: number;
+    nanoseconds: number;
+  };
+}
+
+let friendRequestsWithDetails: FriendRequest[] = [];
+
 const user = await Astro.locals.user;
-const db = getFirestore();
+const db = getFirestore(app);
+const auth = getAuth(app);
 
 if (user) {
   userData = {
@@ -25,7 +41,7 @@ if (user) {
     website: "",
   };
 
-  // Merge additional profile details from Firestore if available.
+  //additional fields from userdoc that i will add in future
   const userDoc = await db.collection("users").doc(user.uid).get();
   if (userDoc.exists) {
     const data = userDoc.data();
@@ -37,13 +53,54 @@ if (user) {
     };
   }
 
-  // Retrieve Friend Requests (assumes a subcollection "friendRequests")
-  const requestsSnapshot = await db.collection("users").doc(user.uid).collection("friendRequests").get();
-  friendRequests = requestsSnapshot.docs.map((doc) => ({ uid: doc.id, ...doc.data() }));
+  // Get friend request IDs and friends IDs
+  const requestStatusDoc = await db.collection("users").doc(user.uid).collection("friends").doc("request-status").get();
+  if (requestStatusDoc.exists) {
+    const requestData = requestStatusDoc.data();
+    friendRequestsIds = requestData?.pendingRequests || [];
+    friends = requestData?.acceptedRequests || [];
+  }
 
-  // Retrieve Friends (assumes a subcollection "friends")
-  const friendsSnapshot = await db.collection("users").doc(user.uid).collection("friends").get();
-  friends = friendsSnapshot.docs.map((doc) => ({ uid: doc.id, ...doc.data() }));
+  // Retrieve Friend Requests (assumes a subcollection "friendRequests")
+  if (friendRequestsIds.length > 0) {
+    friendRequestsWithDetails = await Promise.all(
+      friendRequestsIds.map(async (requesterId) => {
+        try {
+          // Try to get user from Auth
+          const requester = await auth.getUser(requesterId);
+
+          const timestamp = {
+            toDate: () => new Date(),
+            seconds: Math.floor(Date.now() / 1000),
+            nanoseconds: 0
+          };
+          return {
+            uid: requesterId,
+            displayName: requester.displayName || "User",
+            photoURL: requester.photoURL || 
+                     `https://api.dicebear.com/7.x/initials/svg?seed=${requester.displayName || requester.email || requesterId}`,
+            timestamp: timestamp, // You might want to store this in Firestore when the request is created
+          };
+        } catch (error) {
+          // Fallback to a default object if user details can't be fetched
+          console.error(`Error fetching details for user ${requesterId}:`, error);
+
+          const timestamp = {
+            toDate: () => new Date(),
+            seconds: Math.floor(Date.now() / 1000),
+            nanoseconds: 0
+          };
+
+          return {
+            uid: requesterId,
+            displayName: "Unknown User",
+            photoURL: `https://api.dicebear.com/7.x/initials/svg?seed=${requesterId}`,
+            timestamp: timestamp,
+          };
+        }
+      })
+    )
+  }
 }
 ---
 
@@ -59,27 +116,29 @@ if (user) {
 
         <!-- Friends List Section with Add Friend Button -->
         <section>
-          <h2 class="text-xl font-bold text-white mb-4">Your Friends</h2>
-          <div class="flex">
+          
+          <div class="flex flex-col gap-4">
+            <div class="w-full">
+              <AddFriend client:load userId={userData.uid} />
+            </div>
             <!-- Right Column: Friends List -->
-            <div class="w-2/3">
+            <h2 class="text-xl font-bold text-white mb-4">Your Friends</h2>
+            <div class="w-full">
               {friends.length > 0 ? (
                 <FriendsList client:load friends={friends} userId={userData.uid} />
               ) : (
                 <p class="text-gray-400">You haven't added any friends yet.</p>
               )}
             </div>
-            <div class="w-1/3">
-              <AddFriend client:load userId={userData.uid} />
-            </div>
+            
           </div>
         </section>
 
         <!-- Friend Requests Section -->
         <section>
           <h2 class="text-xl font-bold text-white mb-4">Friend Requests</h2>
-          {friendRequests.length > 0 ? (
-            <FriendRequestsList client:load requests={friendRequests} userId={userData.uid} />
+          {friendRequestsWithDetails.length > 0 ? (
+            <FriendRequestsList client:load requests={friendRequestsWithDetails} userId={userData.uid} />
           ) : (
             <p class="text-gray-400">No pending friend requests.</p>
           )}

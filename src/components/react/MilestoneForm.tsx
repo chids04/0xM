@@ -108,7 +108,7 @@ export function MilestoneForm({ onSubmit }: MilestoneFormProps) {
                 <Input
                   type="file"
                   accept="image/*"
-                  className="bg-[#1f1f1f] text-white border border-[#333333] rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="bg-[#1f1f1f] text-white border border-[#333333] rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500  file:mr-5 file:rounded-md file:text-gray-400"
                   {...field}
                 />
               </FormControl>

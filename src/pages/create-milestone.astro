@@ -2,11 +2,37 @@
 // filepath: src/pages/create-milestone.astro
 import Layout from "../layouts/Navbar.astro";
 import { MilestoneForm } from "@/components/react/MilestoneForm";
+import { TagFriendDropdown } from "@/components/react/TagFriendDropdown";
+import { useState } from "react";
+import { ClientTagFriendDropdown } from "@/components/react/ClientTagFriendDropdown";
 
-const handleSubmit = (data) => {
+
+interface Friend {
+  uid: string;
+  displayName: string;
+  email: string;
+  photoURL: string;
+}
+
+// Dummy list of friends; this would typically come from an API or database.
+const friends: Friend[] = [
+  {
+    uid: "friend1",
+    displayName: "Friend One",
+    email: "friend1@example.com",
+    photoURL: "/assets/friend1.png",
+  },
+  {
+    uid: "friend2",
+    displayName: "Friend Two",
+    email: "friend2@example.com",
+    photoURL: "/assets/friend2.png",
+  },
+];
+
+const handleSubmit = (data: any) => {
   console.log("Form Data in Astro Component:", data);
-  // You can now handle the form data here, e.g., send it to an API endpoint
-  // or perform other actions.
+  // Handle form submission logic here
 };
 ---
 
@@ -14,5 +40,13 @@ const handleSubmit = (data) => {
   <div class="container mx-auto py-8">
     <h1 class="text-2xl font-bold mb-4 text-white">Create a New Milestone</h1>
     <MilestoneForm onSubmit={handleSubmit} />
+
+    <div class="mt-8">
+      <h2 class="text-xl text-white mb-2">Tag Friends</h2>
+      <!-- Use the client component so that state (useState) is available -->
+      <ClientTagFriendDropdown client:load friends={friends}/>
+    </div>
   </div>
 </Layout>
+```  
+

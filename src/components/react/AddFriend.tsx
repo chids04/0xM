@@ -64,7 +64,7 @@ export function AddFriend({ userId }: AddFriendProps) {
   };
 
   return (
-    <div className="p-4 bg-[#1f1f1f] rounded-lg border border-[#333333]">
+    <div className="p-4 bg-[#1f1f1f] rounded-lg border border-[#333333] mx-auto sm:mx-0">
       <h3 className="text-lg font-semibold text-white mb-4">Add Friend by Email</h3>
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
@@ -88,7 +88,7 @@ export function AddFriend({ userId }: AddFriendProps) {
           <Button
             type="submit"
             disabled={status === "loading"}
-            className="w-full bg-purple-600 hover:bg-purple-700 transition-colors"
+            className="w-full h-auto bg-purple-600 hover:bg-purple-700 transition-colors py-2 break-words whitespace-normal"
           >
             {status === "loading" ? "Sending..." : "Send Friend Request"}
           </Button>

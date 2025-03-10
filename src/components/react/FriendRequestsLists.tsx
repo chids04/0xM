@@ -55,29 +55,31 @@ export function FriendRequestsList({ requests, userId }: FriendRequestsListProps
       {requests.map((request) => (
         <div
           key={request.uid}
-          className="flex items-center justify-between p-3 bg-[#222222] rounded-lg border border-gray-800 hover:border-purple-500/30 transition-all"
+          className="flex items-center min-w-0 justify-between p-3 bg-[#222222] rounded-lg border border-gray-800 hover:border-purple-500/30 transition-all"
         >
-          <div className="flex items-center gap-3">
+            <div className="flex items-center min-w-0 gap-3">
             <img
               src={request.photoURL}
               alt={`${request.displayName}'s avatar`}
               className="w-10 h-10 rounded-full border border-purple-500/30"
             />
-            <div>
-              <h3 className="text-white font-medium">{request.displayName || "User"}</h3>
+            <div className="overflow-hidden min-w-0">
+              <h3 className="text-white font-medium overflow-hidden text-ellipsis whitespace-nowrap">
+              {request.displayName || "User"}
+              </h3>
               {request.timestamp && (
-                <p className="text-xs text-gray-400">
-                  Requested {new Date(request.timestamp.toDate()).toLocaleDateString()}
-                </p>
+              <p className="text-xs text-gray-400 overflow-hidden text-ellipsis whitespace-nowrap">
+                Requested {new Date(request.timestamp.seconds * 1000).toLocaleDateString()}
+              </p>
               )}
             </div>
-          </div>
+            </div>
           <div className="flex gap-2">
             <Button
               size="sm"
               onClick={() => handleAcceptRequest(request.uid)}
               disabled={processingId === request.uid}
-              className="bg-green-600 hover:bg-green-700 text-white"
+              className="bg-green-600 hover:bg-green-700 text-white truncate min-w-0"
             >
               Accept
             </Button>
@@ -86,7 +88,7 @@ export function FriendRequestsList({ requests, userId }: FriendRequestsListProps
               variant="outline"
               onClick={() => handleDeclineRequest(request.uid)}
               disabled={processingId === request.uid}
-              className="border-red-800 text-red-400 hover:bg-red-950/30"
+              className="border-red-800 text-red-400 hover:bg-red-950/30 truncate min-w-0"
             >
               Decline
             </Button>
