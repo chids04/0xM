@@ -1,4 +1,4 @@
-"use client"
+"use client";
 
 import React, { useState } from "react";
 import { TagFriendDropdown } from "./TagFriendDropdown";
@@ -12,19 +12,24 @@ export interface Friend {
 
 interface ClientTagFriendDropdownProps {
   friends: Friend[];
+  onTagSelect?: (friend: Friend) => void;
+  onRemoveTag?: (friend: Friend) => void;
 }
 
-export function ClientTagFriendDropdown({ friends }: ClientTagFriendDropdownProps) {
+export function ClientTagFriendDropdown({ friends, onTagSelect, onRemoveTag }: ClientTagFriendDropdownProps) {
   const [taggedFriends, setTaggedFriends] = useState<Friend[]>([]);
 
   const handleTagSelect = (friend: Friend) => {
     if (!taggedFriends.some((f) => f.uid === friend.uid)) {
-      setTaggedFriends([...taggedFriends, friend]);
+      const updatedTags = [...taggedFriends, friend];
+      setTaggedFriends(updatedTags);
+      onTagSelect && onTagSelect(friend);
     }
   };
 
-  const handleRemove = (friendToRemove: Friend) => {
-    setTaggedFriends(taggedFriends.filter((f) => f.uid !== friendToRemove.uid));
+  const handleRemove = (friend: Friend) => {
+    setTaggedFriends(taggedFriends.filter((f) => f.uid !== friend.uid));
+    onRemoveTag && onRemoveTag(friend);
   };
 
   return (

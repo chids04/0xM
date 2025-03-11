@@ -1,11 +1,9 @@
 ---
-// filepath: src/pages/create-milestone.astro
 import Layout from "../layouts/Navbar.astro";
-import { MilestoneForm } from "@/components/react/MilestoneForm";
-import { TagFriendDropdown } from "@/components/react/TagFriendDropdown";
-import { useState } from "react";
-import { ClientTagFriendDropdown } from "@/components/react/ClientTagFriendDropdown";
-
+import { CreateMilestone } from "@/components/react/CreateMilestone";
+import { getFirestore } from "firebase-admin/firestore";
+import { getAuth } from "firebase-admin/auth";
+import { app } from "../firebase/server";
 
 interface Friend {
   uid: string;
@@ -14,39 +12,46 @@ interface Friend {
   photoURL: string;
 }
 
-// Dummy list of friends; this would typically come from an API or database.
-const friends: Friend[] = [
-  {
-    uid: "friend1",
-    displayName: "Friend One",
-    email: "friend1@example.com",
-    photoURL: "/assets/friend1.png",
-  },
-  {
-    uid: "friend2",
-    displayName: "Friend Two",
-    email: "friend2@example.com",
-    photoURL: "/assets/friend2.png",
-  },
-];
+let friends: Friend[] = [];
+let friendIds: string[] = [];
 
-const handleSubmit = (data: any) => {
-  console.log("Form Data in Astro Component:", data);
-  // Handle form submission logic here
-};
+const db = getFirestore(app);
+const auth = getAuth(app);
+const user = Astro.locals.user;
+
+const requestStatusDoc = await db
+  .collection("users")
+  .doc(user.uid)
+  .collection("friends")
+  .doc("request-status")
+  .get();
+if (requestStatusDoc.exists) {
+  const requestData = requestStatusDoc.data();
+  friendIds = requestData?.acceptedRequests || [];
+}
+
+if (friendIds.length > 0) {
+  friends = (await Promise.all(
+    friendIds.map(async (id) => {
+      try {
+        const friend = await auth.getUser(id);
+        return {
+          uid: id,
+          displayName: friend.displayName || "User",
+          email: friend.email,
+          photoURL:
+            friend.photoURL ||
+            `https://api.dicebear.com/7.x/initials/svg?seed=${friend.displayName || friend.email || id}`,
+        };
+      } catch (e) {
+        console.error(e);
+        return null;
+      }
+    })
+  )).filter((friend): friend is Friend => friend !== null);
+}
 ---
 
 <Layout title="Create Milestone">
-  <div class="container mx-auto py-8">
-    <h1 class="text-2xl font-bold mb-4 text-white">Create a New Milestone</h1>
-    <MilestoneForm onSubmit={handleSubmit} />
-
-    <div class="mt-8">
-      <h2 class="text-xl text-white mb-2">Tag Friends</h2>
-      <!-- Use the client component so that state (useState) is available -->
-      <ClientTagFriendDropdown client:load friends={friends}/>
-    </div>
-  </div>
+  <CreateMilestone client:load friends={friends} />
 </Layout>
-```  
-

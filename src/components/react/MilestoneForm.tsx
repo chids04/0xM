@@ -1,12 +1,11 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useLayoutEffect } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import {
   Form,
   FormControl,
@@ -16,18 +15,19 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
+import { fromRoutingStrategy } from "node_modules/astro/dist/i18n/utils";
 
 const milestoneSchema = z.object({
   description: z.string().min(10, { message: "Description must be at least 10 characters." }),
   milestone_date: z.string().refine((date) => {
     try {
-      new Date(date);
-      return true;
+      const parsed = new Date(date);
+      return !isNaN(parsed.getTime())
     } catch (error) {
       return false;
     }
   }, {
-    message: "Invalid date format. Please use YYYY-MM-DD.",
+    message: "Invalid date format. Please use DD-MM-YYYY.",
   }),
   image: z.any(), // Handle file uploads with 'any' type for simplicity
 });
@@ -35,10 +35,10 @@ const milestoneSchema = z.object({
 type MilestoneSchemaType = z.infer<typeof milestoneSchema>;
 
 interface MilestoneFormProps {
-  onSubmit: (data: MilestoneSchemaType) => void; // Function to handle form submission
+  setSubmitForm: (submitFn: () => Promise<MilestoneSchemaType>) => void; // Return form data
 }
 
-export function MilestoneForm({ onSubmit }: MilestoneFormProps) {
+export function MilestoneForm({ setSubmitForm }: MilestoneFormProps) {
   const form = useForm<MilestoneSchemaType>({
     resolver: zodResolver(milestoneSchema),
     defaultValues: {
@@ -49,13 +49,20 @@ export function MilestoneForm({ onSubmit }: MilestoneFormProps) {
     mode: "onChange",
   });
 
-  const handleSubmit = (values: MilestoneSchemaType) => {
-    onSubmit(values); // Call the parent component's onSubmit function
-  };
+  // Expose form submission function
+  useLayoutEffect(() => {
+    setSubmitForm(() => async () => {
+      await form.trigger(); // Ensure validation happens
+      if (form.formState.isValid) {
+        return form.getValues(); // Return the form data
+      }
+      return null // Return null if the form is invalid
+    });
+  }, [setSubmitForm, form]);
 
   return (
     <Form {...form}>
-      <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
+      <form className="space-y-6">
         <FormField
           control={form.control}
           name="description"
@@ -82,7 +89,7 @@ export function MilestoneForm({ onSubmit }: MilestoneFormProps) {
           name="milestone_date"
           render={({ field }) => (
             <FormItem>
-              <FormLabel className="text-white">date</FormLabel>
+              <FormLabel className="text-white">Date</FormLabel>
               <FormControl>
                 <Input
                   type="date"
@@ -119,10 +126,6 @@ export function MilestoneForm({ onSubmit }: MilestoneFormProps) {
             </FormItem>
           )}
         />
-
-        <Button type="submit" className="bg-[#141313] text-white rounded-md hover:bg-[#111111] outline-2 outline-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-700">
-          Create Milestone
-        </Button>
       </form>
     </Form>
   );
