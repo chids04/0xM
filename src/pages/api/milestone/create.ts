@@ -5,16 +5,34 @@ import { getAuth } from "firebase-admin/auth";
 import { ethers } from "ethers";
 import crypto from "crypto";
 
-// Import ABI from your compiled contract artifacts
 import milestoneTrackerABI from "../../../contracts/MilestonTrackerABI.json";
+const ENCRYPTION_KEY: string = import.meta.env.ENCRYPTION_KEY;
 
 // Function to hash milestone data for blockchain verification
 function hashMilestone(data: any) {
   return crypto.createHash('sha256').update(JSON.stringify(data)).digest('hex');
 }
 
-export const POST: APIRoute = async ({ request, cookies }) => {
+export function decryptPrivateKey(encryptedData: string): string {
+    const [iv, encrypted] = encryptedData.split(":");
+    
+    const key = Buffer.from(ENCRYPTION_KEY, 'hex');
+    if (key.length !== 32) {
+        throw new Error("Encryption key must be 32 bytes.");
+    }
 
+    const ivBuffer = Buffer.from(iv, 'hex');
+    if (ivBuffer.length !== 16) {
+        throw new Error("IV must be 16 bytes.");
+    }
+
+    const decipher = crypto.createDecipheriv("aes-256-cbc", key, ivBuffer);
+    let decrypted = decipher.update(encrypted, "hex", "utf8");
+    decrypted += decipher.final("utf8");
+    return decrypted;
+  }
+
+export const POST: APIRoute = async ({ request, cookies }) => {
 
   try {
     const data = await request.json();
@@ -52,16 +70,17 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     // Prepare milestone data but don't save to Firebase yet
     const db = getFirestore(app);
     
-    // Generate a unique ID for the milestone
+    // generate a unique ID for the milestone
     const milestoneId = db.collection("milestones").doc().id;
     
+    //this is for firebase
     const milestoneData = {
       id: milestoneId,
       description,
       milestone_date,
       image: image || "",
       owner: uid,
-      participants: taggedFriendIds || [],
+      participants: [] as string[], 
       taggedFriendIds: taggedFriendIds || [],
       isPending: taggedFriendIds?.length > 0,
       createdAt: new Date().toISOString(),
@@ -70,8 +89,6 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       milestoneIndex: 0,
     };
     
-    // generate hash of milestone data for blockchain
-    const milestoneHash = hashMilestone(milestoneData);
     
     try {
       // connect to Ethereum network
@@ -79,14 +96,73 @@ export const POST: APIRoute = async ({ request, cookies }) => {
         import.meta.env.ETHEREUM_RPC_URL || "http://localhost:8545"
       );
       
+    
       // Wallet for signing transactions
+
+      //get encrypted priv key from firebase
+
+      let encryptedPrivKey
+      const walletDoc = await db.collection("users").doc(uid).collection("wallet").doc("wallet_info").get()
+
+      if(walletDoc.exists){
+        const walletData = walletDoc.data()
+        encryptedPrivKey = walletData?.encryptedPrivateKey
+      }
+
+
+      //send some eth to account, wallet not implemented yet so do this for now
+      const testWallet = new ethers.Wallet(
+        import.meta.env.ETHEREUM_PRIVATE_KEY,
+        provider
+      )
+
       const wallet = new ethers.Wallet(
-        import.meta.env.ETHEREUM_PRIVATE_KEY, 
+        decryptPrivateKey(encryptedPrivKey), 
         provider
       );
+
+      const sendMoney = await testWallet.sendTransaction({
+        to: wallet.address,
+        value: ethers.parseEther("1.0")
+      })
+
+      console.log("sending funds")
+      await sendMoney.wait();
+      console.log("funds sent");
+ 
       
       // Get the address of your deployed proxy contract
       const contractAddress = import.meta.env.MILESTONE_TRACKER_ADDRESS;
+
+      if (taggedFriendIds && taggedFriendIds.length > 0) {
+        for (const friendId of taggedFriendIds) {
+          //also need to get the the pub key of the particpants,
+          const walletRef = db.collection("users").doc(friendId).collection("wallet").doc("wallet_info")
+          const walletDoc = await walletRef.get()
+          const friendUser = await auth.getUser(friendId);
+          const email = friendUser.email
+
+          if(walletDoc.exists){
+            const walletData = walletDoc.data();
+            const friendPublicKey = walletData?.publicKey;
+
+            if(friendPublicKey){
+              // Now TypeScript knows participants is a string array
+              milestoneData.participants.push(friendPublicKey);
+            }
+          }
+
+          else{
+            return new Response(
+              JSON.stringify({ 
+                message: email + " is missing a private / public key, tell them to generate one in settings", 
+                errorCode: "BLOCKCHAIN_TRANSACTION_FAILED"
+              }),
+              { status: 500, headers: { "Content-Type": "application/json" } }
+            );
+          }
+        }
+      }
 
       // create contract instance
       const milestoneContract = new ethers.Contract(
@@ -97,23 +173,26 @@ export const POST: APIRoute = async ({ request, cookies }) => {
 
       let txHash: string;
 
-    console.log(wallet.address);
-
       let tx;
+      let isGroup = false;
+
+
+      const milestoneHash = hashMilestone(milestoneData);
       
       // Execute the appropriate contract method based on whether there are participants
       if (!taggedFriendIds || taggedFriendIds.length === 0) {
         // Call addMilestone for solo milestones
         tx = await milestoneContract.addMilestone(
-          description,
+          milestoneData.description,
           milestoneHash,
           milestoneId
         );
       } else {
         // Call addGroupMilestone for group milestones
+        isGroup = true;
         tx = await milestoneContract.addGroupMilestone(
-          description,
-          taggedFriendIds, // These should be Ethereum addresses
+          milestoneData.description,
+          milestoneData.participants, // These should be Ethereum addresses
           milestoneHash,
           milestoneId
         );
@@ -125,110 +204,130 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       console.log("Transaction confirmed:", receipt);
       
       // Add blockchain information to the milestone data
-      
-      milestoneData.transactionHash = receipt.hash;
       txHash = receipt.hash
       milestoneData.blockNumber = receipt.blockNumber;
 
       if(receipt.status == 1){
 
-        const events = await milestoneContract.queryFilter(
+        let events;
+        //filter events by wallet address
+        if(!isGroup){
+          events = await milestoneContract.queryFilter(
           milestoneContract.filters.MilestoneAdded(wallet.address), 
           "latest"
-        );
-
-        for (const event of events.filter(e => e.transactionHash === receipt.hash)) {
-          const { user, milestoneIndex, description, timeStamp, id } = event.args;
-          console.log(`Milestone added by ${user}:`);
-          console.log(`Milestone Index: ${milestoneIndex}`);
-          console.log(`Description: ${description}`);
-          console.log(`Timestamp: ${timeStamp}`);
-          console.log(`Milestone ID: ${id}`);
-
-          //here i can pass this data to my admin panel, to track transactions
-      }
-        const milestonesDocRef = db.collection("users").doc(uid).collection("milestones").doc("milestoneData");
-        
-        // First check if the document exists
-        const milestonesDoc = await milestonesDocRef.get();
-        
-        if (!milestonesDoc.exists) {
-          // If document doesn't exist, create it with initial arrays
-          if (!taggedFriendIds || taggedFriendIds.length === 0) {
-            await milestonesDocRef.set({
-              acceptedMilestones: [milestoneData],
-              pendingMilestones: []
-            });
-          } else {
-            await milestonesDocRef.set({
-              acceptedMilestones: [],
-              pendingMilestones: [milestoneData]
-            });
-          }
-        } else {
-          if (!taggedFriendIds || taggedFriendIds.length === 0) {
-
-            // for milestones without tagged friends, append to acceptedMilestones
-            await milestonesDocRef.update({
-              acceptedMilestones: FieldValue.arrayUnion(milestoneData)
-            });
-          } else {
-            // for milestones with tagged friends, append to pendingMilestones
-            await milestonesDocRef.update({
-              pendingMilestones: FieldValue.arrayUnion(milestoneData)
-            });
-          }
+        )
+        }else{
+          events = await milestoneContract.queryFilter(
+            milestoneContract.filters.GroupMilestoneAdded(wallet.address)
+          )
         }
-        
-        // if there are tagged friends, create milestone requests for them
-        if (taggedFriendIds && taggedFriendIds.length > 0) {
-          for (const friendId of taggedFriendIds) {
-            const friendRequestRef = db.collection("users").doc(friendId).collection("milestones").doc("milestoneData");
+        //then filter by transaction hash for the specific transaction
+        for (const event of events.filter(e => e.transactionHash === receipt.hash)) {
+
+          if(!isGroup){
+            const { user, milestoneIndex, description, timeStamp, id } = event.args;
+            console.log(`Milestone added by ${user}:`);
+            console.log(`Milestone Index: ${milestoneIndex}`);
+            console.log(`Description: ${description}`);
+            console.log(`Timestamp: ${timeStamp}`);
+            console.log(`Milestone ID: ${id}`);
+
+          }
+          else{
+            const { user, milestoneIndex, description, timeStamp, id, particpantCount } = event.args;
+            console.log(`Milestone added by ${user}:`);
+            console.log(`Milestone Index: ${milestoneIndex}`);
+            console.log(`Description: ${description}`);
+            console.log(`Timestamp: ${timeStamp}`);
+            console.log(`Milestone ID: ${id}`);
+            console.log(`Particpant Count: ${particpantCount}`)
+
+            for (const friendId of taggedFriendIds) {
+              const friendRequestRef = db.collection("users").doc(friendId).collection("milestones").doc("milestoneData");
+              
+              const milestoneRequest = {
+                ...milestoneData,
+                requestedBy: uid,
+                requestDate: new Date().toISOString(),
+                status: "pending",
+                transactionHash: receipt.hash, // Include blockchain transaction info
+                blockNumber: receipt.blockNumber
+              };
+              
+              const friendMilestonesDoc = await friendRequestRef.get();
+              
+              if (!friendMilestonesDoc.exists) {
+                await friendRequestRef.set({
+                  acceptedMilestones: [],
+                  pendingMilestones: [],
+                  requestedMilestones: [milestoneRequest]
+                });
+              } else {
+                await friendRequestRef.update({
+                  requestedMilestones: FieldValue.arrayUnion(milestoneRequest)
+                });
+              }
+            }
             
-            const milestoneRequest = {
-              ...milestoneData,
-              requestedBy: uid,
-              requestDate: new Date().toISOString(),
-              status: "pending"
-            };
-            
-            // Check if the friend's milestonesData document exists
-            const friendMilestonesDoc = await friendRequestRef.get();
-            
-            if (!friendMilestonesDoc.exists) {
-              // If document doesn't exist, create it with initial structure
-              await friendRequestRef.set({
-                acceptedMilestones: [],
-                pendingMilestones: [],
-                requestedMilestones: [milestoneRequest]
+          }
+
+
+          //here i can pass this data to my admin panel, to track transactions for now i just write to firebase
+
+          const milestonesDocRef = db.collection("users").doc(uid).collection("milestones").doc("milestoneData");
+          const milestonesDoc = await milestonesDocRef.get();
+          
+          if (!milestonesDoc.exists) {
+            // If document doesn't exist, create it with initial arrays
+            if (!taggedFriendIds || taggedFriendIds.length === 0) {
+              await milestonesDocRef.set({
+                acceptedMilestones: [milestoneData],
+                pendingMilestones: []
               });
             } else {
-              // Document exists, so append to requestedMilestones using arrayUnion
-              await friendRequestRef.update({
-                requestedMilestones: FieldValue.arrayUnion(milestoneRequest)
+              await milestonesDocRef.set({
+                acceptedMilestones: [],
+                pendingMilestones: [milestoneData]
+              });
+            }
+          } else {
+            if (!taggedFriendIds || taggedFriendIds.length === 0) {
+
+              // for milestones without tagged friends, append to acceptedMilestones
+              await milestonesDocRef.update({
+                acceptedMilestones: FieldValue.arrayUnion(milestoneData)
+              });
+            } else {
+              // for milestones with tagged friends, append to pendingMilestones
+              await milestonesDocRef.update({
+                pendingMilestones: FieldValue.arrayUnion(milestoneData)
               });
             }
           }
+          
+          return new Response(
+            JSON.stringify({ 
+              message: "Milestone created and added to blockchain.", 
+              id: milestoneId,
+              transactionHash: receipt.transactionHash,
+              blockchainData: {
+                blockNumber: receipt.blockNumber,
+                gasUsed: receipt.gasUsed.toString()
+              }
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        
+          break;
         }
-        
-        
 
-        return new Response(
-          JSON.stringify({ 
-            message: "Milestone created and added to blockchain.", 
-            id: milestoneId,
-            transactionHash: receipt.transactionHash,
-            blockchainData: {
-              blockNumber: receipt.blockNumber,
-              gasUsed: receipt.gasUsed.toString()
-            }
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } }
-        );
+        //if here then no event was emitted, blockchain error
+
+        console.error("No Milestone added event was recieved")
       }
+
       else{
         //blockchain transaction was not succesful
-
         console.error("Blockchain transaction was unsuccesful")
         return new Response(
           JSON.stringify({ 
@@ -262,4 +361,11 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }
+
+  return new Response(
+    JSON.stringify({ error: "Unknown error occurred" }),
+    { status: 500, headers: { "Content-Type": "application/json" } }
+  );
+
+  
 };
