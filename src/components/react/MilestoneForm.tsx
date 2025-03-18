@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useLayoutEffect } from "react";
+import React, { useEffect, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -15,7 +15,6 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
-import { fromRoutingStrategy } from "node_modules/astro/dist/i18n/utils";
 
 const milestoneSchema = z.object({
   description: z.string().min(10, { message: "Description must be at least 10 characters." }),
@@ -35,7 +34,7 @@ const milestoneSchema = z.object({
 type MilestoneSchemaType = z.infer<typeof milestoneSchema>;
 
 interface MilestoneFormProps {
-  setSubmitForm: (submitFn: () => Promise<MilestoneSchemaType>) => void; // Return form data
+  setSubmitForm: (submitFn: () => Promise<MilestoneSchemaType | null>) => void;
 }
 
 export function MilestoneForm({ setSubmitForm }: MilestoneFormProps) {
@@ -49,20 +48,23 @@ export function MilestoneForm({ setSubmitForm }: MilestoneFormProps) {
     mode: "onChange",
   });
 
-  // Expose form submission function
-  useLayoutEffect(() => {
-    setSubmitForm(() => async () => {
-      await form.trigger(); // Ensure validation happens
-      if (form.formState.isValid) {
-        return form.getValues(); // Return the form data
-      }
-      return null // Return null if the form is invalid
-    });
-  }, [setSubmitForm, form]);
+  // Memoize the submitForm function to prevent recreation on each render
+  const submitFormFn = useCallback(async () => {
+    const isValid = await form.trigger();
+    if (isValid) {
+      return form.getValues();
+    }
+    return null;
+  }, [form]);
+
+  // Run this effect only once when the component mounts
+  useEffect(() => {
+    setSubmitForm(submitFormFn);
+  }, [setSubmitForm, submitFormFn]);
 
   return (
     <Form {...form}>
-      <form className="space-y-6">
+      <form className="space-y-6" onSubmit={(e) => e.preventDefault()}>
         <FormField
           control={form.control}
           name="description"
@@ -108,15 +110,18 @@ export function MilestoneForm({ setSubmitForm }: MilestoneFormProps) {
         <FormField
           control={form.control}
           name="image"
-          render={({ field }) => (
+          render={({ field: { value, onChange, ...fieldProps } }) => (
             <FormItem>
               <FormLabel className="text-white">Image</FormLabel>
               <FormControl>
                 <Input
                   type="file"
                   accept="image/*"
-                  className="bg-[#1f1f1f] text-white border border-[#333333] rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500  file:mr-5 file:rounded-md file:text-gray-400"
-                  {...field}
+                  className="bg-[#1f1f1f] text-white border border-[#333333] rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 file:mr-5 file:rounded-md file:text-gray-400"
+                  onChange={(e) => {
+                    onChange(e.target.files?.[0] || null);
+                  }}
+                  {...fieldProps}
                 />
               </FormControl>
               <FormDescription className="text-gray-400">

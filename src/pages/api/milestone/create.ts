@@ -4,6 +4,7 @@ import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { getAuth } from "firebase-admin/auth";
 import { ethers } from "ethers";
 import crypto from "crypto";
+import { v4 as uuidv4 } from "uuid";
 
 import milestoneTrackerABI from "../../../contracts/MilestonTrackerABI.json";
 const ENCRYPTION_KEY: string = import.meta.env.ENCRYPTION_KEY;
@@ -13,7 +14,7 @@ function hashMilestone(data: any) {
   return crypto.createHash('sha256').update(JSON.stringify(data)).digest('hex');
 }
 
-export function decryptPrivateKey(encryptedData: string): string {
+function decryptPrivateKey(encryptedData: string): string {
     const [iv, encrypted] = encryptedData.split(":");
     
     const key = Buffer.from(ENCRYPTION_KEY, 'hex');
@@ -71,7 +72,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     const db = getFirestore(app);
     
     // generate a unique ID for the milestone
-    const milestoneId = db.collection("milestones").doc().id;
+    const milestoneId = uuidv4();
     
     //this is for firebase
     const milestoneData = {
@@ -84,9 +85,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       taggedFriendIds: taggedFriendIds || [],
       isPending: taggedFriendIds?.length > 0,
       createdAt: new Date().toISOString(),
-      transactionHash: "",
-      blockNumber: 0,
-      milestoneIndex: 0,
+      hash: ""
     };
     
     
@@ -147,7 +146,6 @@ export const POST: APIRoute = async ({ request, cookies }) => {
             const friendPublicKey = walletData?.publicKey;
 
             if(friendPublicKey){
-              // Now TypeScript knows participants is a string array
               milestoneData.participants.push(friendPublicKey);
             }
           }
@@ -171,14 +169,14 @@ export const POST: APIRoute = async ({ request, cookies }) => {
         wallet
       );
 
-      let txHash: string;
 
       let tx;
       let isGroup = false;
 
 
       const milestoneHash = hashMilestone(milestoneData);
-      
+      milestoneData.hash = milestoneHash
+
       // Execute the appropriate contract method based on whether there are participants
       if (!taggedFriendIds || taggedFriendIds.length === 0) {
         // Call addMilestone for solo milestones
@@ -202,10 +200,8 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       console.log("Waiting for transaction to be mined...");
       const receipt = await tx.wait();
       console.log("Transaction confirmed:", receipt);
+
       
-      // Add blockchain information to the milestone data
-      txHash = receipt.hash
-      milestoneData.blockNumber = receipt.blockNumber;
 
       if(receipt.status == 1){
 
@@ -213,30 +209,46 @@ export const POST: APIRoute = async ({ request, cookies }) => {
         //filter events by wallet address
         if(!isGroup){
           events = await milestoneContract.queryFilter(
-          milestoneContract.filters.MilestoneAdded(wallet.address), 
+          milestoneContract.filters.MilestoneAdded(wallet.address),
           "latest"
         )
+
+        console.log("added event filter")
         }else{
           events = await milestoneContract.queryFilter(
-            milestoneContract.filters.GroupMilestoneAdded(wallet.address)
+            milestoneContract.filters.GroupMilestoneAdded(wallet.address),
+            "latest"
           )
         }
+
+
         //then filter by transaction hash for the specific transaction
         for (const event of events.filter(e => e.transactionHash === receipt.hash)) {
 
           if(!isGroup){
-            const { user, milestoneIndex, description, timeStamp, id } = event.args;
+            const parsedLog = milestoneContract.interface.parseLog(event)
+
+            if (!parsedLog || !parsedLog.args) {
+              console.error("Parsed log is null or missing args");
+              continue;
+            }
+            const { user, id, description, timeStamp } = parsedLog.args;
             console.log(`Milestone added by ${user}:`);
-            console.log(`Milestone Index: ${milestoneIndex}`);
             console.log(`Description: ${description}`);
             console.log(`Timestamp: ${timeStamp}`);
             console.log(`Milestone ID: ${id}`);
 
           }
           else{
-            const { user, milestoneIndex, description, timeStamp, id, particpantCount } = event.args;
+            const parsedLog = milestoneContract.interface.parseLog(event)
+
+            if (!parsedLog || !parsedLog.args) {
+              console.error("Parsed log is null or missing args");
+              continue;
+            }
+ 
+            const { user, id, description, timeStamp, particpantCount } = parsedLog.args;
             console.log(`Milestone added by ${user}:`);
-            console.log(`Milestone Index: ${milestoneIndex}`);
             console.log(`Description: ${description}`);
             console.log(`Timestamp: ${timeStamp}`);
             console.log(`Milestone ID: ${id}`);
@@ -318,7 +330,6 @@ export const POST: APIRoute = async ({ request, cookies }) => {
             { status: 200, headers: { "Content-Type": "application/json" } }
           );
         
-          break;
         }
 
         //if here then no event was emitted, blockchain error
