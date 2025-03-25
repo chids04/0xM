@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useCallback } from "react";
+import React, { useEffect, useCallback, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -18,17 +18,24 @@ import {
 
 const milestoneSchema = z.object({
   description: z.string().min(10, { message: "Description must be at least 10 characters." }),
-  milestone_date: z.string().refine((date) => {
-    try {
-      const parsed = new Date(date);
-      return !isNaN(parsed.getTime())
-    } catch (error) {
-      return false;
+  milestone_date: z.string().refine(
+    (date) => {
+      try {
+        const parsed = new Date(date);
+        return !isNaN(parsed.getTime());
+      } catch (error) {
+        return false;
+      }
+    },
+    {
+      message: "Invalid date format. Please use YYYY-MM-DD.",
     }
-  }, {
-    message: "Invalid date format. Please use DD-MM-YYYY.",
-  }),
-  image: z.any(), // Handle file uploads with 'any' type for simplicity
+  ),
+  image: z
+    .string()
+    .url({ message: "Please enter a valid URL (e.g., https://example.com/image.jpg)." })
+    .optional()
+    .or(z.literal("")), // Allow empty string for optional field
 });
 
 type MilestoneSchemaType = z.infer<typeof milestoneSchema>;
@@ -43,12 +50,13 @@ export function MilestoneForm({ setSubmitForm }: MilestoneFormProps) {
     defaultValues: {
       description: "",
       milestone_date: "",
-      image: null,
+      image: "",
     },
     mode: "onChange",
   });
 
-  // Memoize the submitForm function to prevent recreation on each render
+  const [imagePreview, setImagePreview] = useState<string>("");
+
   const submitFormFn = useCallback(async () => {
     const isValid = await form.trigger();
     if (isValid) {
@@ -57,10 +65,19 @@ export function MilestoneForm({ setSubmitForm }: MilestoneFormProps) {
     return null;
   }, [form]);
 
-  // Run this effect only once when the component mounts
   useEffect(() => {
     setSubmitForm(submitFormFn);
   }, [setSubmitForm, submitFormFn]);
+
+  // Watch the image field and update preview
+  const imageValue = form.watch("image");
+  useEffect(() => {
+    if (imageValue && z.string().url().safeParse(imageValue).success) {
+      setImagePreview(imageValue);
+    } else {
+      setImagePreview("");
+    }
+  }, [imageValue]);
 
   return (
     <Form {...form}>
@@ -110,24 +127,32 @@ export function MilestoneForm({ setSubmitForm }: MilestoneFormProps) {
         <FormField
           control={form.control}
           name="image"
-          render={({ field: { value, onChange, ...fieldProps } }) => (
+          render={({ field }) => (
             <FormItem>
-              <FormLabel className="text-white">Image</FormLabel>
+              <FormLabel className="text-white">Image URL</FormLabel>
               <FormControl>
                 <Input
-                  type="file"
-                  accept="image/*"
-                  className="bg-[#1f1f1f] text-white border border-[#333333] rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 file:mr-5 file:rounded-md file:text-gray-400"
-                  onChange={(e) => {
-                    onChange(e.target.files?.[0] || null);
-                  }}
-                  {...fieldProps}
+                  type="url"
+                  placeholder="Enter image URL (e.g., https://example.com/image.jpg)"
+                  className="bg-[#1f1f1f] text-white border border-[#333333] rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  {...field}
                 />
               </FormControl>
               <FormDescription className="text-gray-400">
-                Upload an image to represent this milestone.
+                Enter the URL of an image to represent this milestone (optional).
               </FormDescription>
               <FormMessage />
+              {imagePreview && (
+                <div className="mt-2">
+                  <p className="text-white mb-1">Preview:</p>
+                  <img
+                    src={imagePreview}
+                    alt="Milestone preview"
+                    className="max-w-full h-auto rounded-md border border-gray-700"
+                    onError={() => setImagePreview("")}
+                  />
+                </div>
+              )}
             </FormItem>
           )}
         />

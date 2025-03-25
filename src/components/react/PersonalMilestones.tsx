@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { doc, getDoc, getFirestore } from 'firebase/firestore';
 import { app } from '../../firebase/client';
 
@@ -36,16 +36,21 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
           const data = snapshot.data();
           const milestoneArr = data.acceptedMilestones || [];
           // Map only the fields we need: description, milestone_date, createdAt
-          const milestonesData = milestoneArr.map((item: any, index: number) => ({
-            description: item.description,
-            milestone_date: item.milestone_date,
-            createdAt: item.createdAt,
-            id: item.id || index,
-            index,
-          }));
+          const milestonesData = milestoneArr
+            .filter((item: any) => {
+              const participants = item.participants || [];
+              return participants.length === 0;
+            })
+            .map((item: any, index: number) => ({
+              description: item.description,
+              milestone_date: item.milestone_date,
+              createdAt: item.createdAt,
+              id: item.id || index,
+              index,
+            }));
           // Sort by milestone_date
           milestonesData.sort(
-            (a, b) => new Date(a.milestone_date).getTime() - new Date(b.milestone_date).getTime()
+            (a: any, b: any) => new Date(a.milestone_date).getTime() - new Date(b.milestone_date).getTime()
           );
           setMilestones(milestonesData);
           setFilteredMilestones(milestonesData);
@@ -65,7 +70,7 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
   }, [userId]);
 
   // Update card positions when window resizes or filtered milestones change
-  useEffect(() => {
+  useLayoutEffect(() => {
     const updatePositions = () => {
       if (!containerRef.current || filteredMilestones.length === 0) return;
       const container = containerRef.current;
@@ -73,7 +78,12 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
       const totalMilestones = milestoneElements.length;
       const containerWidth = container.clientWidth;
       const containerHeight = container.clientHeight;
-
+  
+      // If container isn’t ready, retry after a short delay
+      if (containerWidth === 0 || containerHeight === 0) {
+        return; 
+      }
+  
       if (window.innerWidth < 768) {
         milestoneElements.forEach((milestone, i) => {
           const cardHeight = 180;
@@ -81,29 +91,54 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
           (milestone as HTMLElement).style.top = `${verticalPos}px`;
           (milestone as HTMLElement).style.left = '50%';
         });
-        return;
+      } else {
+        // Sine wave layout for larger screens
+        const maxAmplitude = containerWidth * 0.3;
+        const amplitude = Math.min(maxAmplitude, Math.max(20, (window.innerWidth - 480) / 4));
+        const cardHeight = 180;
+        const totalSpacing = containerHeight - (cardHeight * totalMilestones);
+        const spaceBetweenCards = totalSpacing / (totalMilestones + 5);
+  
+        milestoneElements.forEach((milestone) => {
+          const index = parseInt(milestone.getAttribute('data-index') || '0');
+          const verticalPos = spaceBetweenCards * (index + 1) + cardHeight * index + cardHeight / 2;
+          const sinePosition = totalMilestones > 1 ? (index / (totalMilestones - 1)) * Math.PI * 3 : 0;
+          const horizontalOffset = Math.sin(sinePosition) * amplitude;
+          const horizontalPos = 0.5 + horizontalOffset / containerWidth;
+          (milestone as HTMLElement).style.top = `${verticalPos}px`;
+          (milestone as HTMLElement).style.left = `${horizontalPos * 100}%`;
+        });
       }
-
-      // Sine wave layout for larger screens:
-      const maxAmplitude = containerWidth * 0.3;
-      const amplitude = Math.min(maxAmplitude, Math.max(20, (window.innerWidth - 480) / 4));
-      const cardHeight = 180;
-      const totalSpacing = containerHeight - (cardHeight * totalMilestones);
-      const spaceBetweenCards = totalSpacing / (totalMilestones + 5);
-
-      milestoneElements.forEach((milestone) => {
-        const index = parseInt(milestone.getAttribute('data-index') || '0');
-        const verticalPos = spaceBetweenCards * (index + 1) + cardHeight * index + cardHeight / 2;
-        const sinePosition = (index / (totalMilestones - 1)) * Math.PI * 3;
-        const horizontalOffset = Math.sin(sinePosition) * amplitude;
-        const horizontalPos = 0.5 + horizontalOffset / containerWidth;
-        (milestone as HTMLElement).style.top = `${verticalPos}px`;
-        (milestone as HTMLElement).style.left = `${horizontalPos * 100}%`;
-      });
     };
-    updatePositions();
-    window.addEventListener('resize', updatePositions);
-    return () => window.removeEventListener('resize', updatePositions);
+  
+    // Debounced version for resize events
+    const debounce = (func: Function, wait: number) => {
+      let timeout: NodeJS.Timeout;
+      return (...args: any[]) => {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func(...args), wait);
+      };
+    };
+  
+    const debouncedUpdatePositions = debounce(updatePositions, 50);
+  
+    // Initial positioning with retry mechanism
+    const initializePositions = () => {
+      if (!containerRef.current || containerRef.current.clientWidth === 0) {
+        requestAnimationFrame(initializePositions); // Retry until container is ready
+      } else {
+        updatePositions();
+      }
+    };
+  
+    initializePositions(); // Run on mount
+    window.addEventListener('resize', debouncedUpdatePositions);
+    window.addEventListener('pageshow', updatePositions);
+  
+    return () => {
+      window.removeEventListener('resize', debouncedUpdatePositions);
+      window.removeEventListener('pageshow', updatePositions);
+    };
   }, [filteredMilestones]);
 
   // Filter milestones by description (if search is desired) and date range

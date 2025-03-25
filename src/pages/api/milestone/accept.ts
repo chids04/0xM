@@ -233,17 +233,6 @@ export const POST: APIRoute = async ({ request, cookies }) => {
         if (milestoneIndex !== -1) {
           const milestone = pendingMilestones[milestoneIndex];
           
-          // Record the signature
-          if (!milestone.signatures) {
-            milestone.signatures = [];
-          }
-          
-          milestone.signatures.push({
-            signer: currentUserAddress,
-            uid: currentUserUid,
-            timestamp: new Date().toISOString(),
-            transactionHash: receipt.hash
-          });
           
           // If milestone is finalized, move it to accepted
           if (isFinalized) {
@@ -254,11 +243,6 @@ export const POST: APIRoute = async ({ request, cookies }) => {
             await ownerMilestonesRef.update({
               pendingMilestones,
               acceptedMilestones
-            });
-          } else {
-            // Just update the pending milestone with the new signature
-            await ownerMilestonesRef.update({
-              pendingMilestones
             });
           }
         }

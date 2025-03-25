@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { doc, getDoc, updateDoc, getFirestore } from 'firebase/firestore';
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { app } from '../../firebase/client';
+import { doc, getDoc, getFirestore } from 'firebase/firestore';
 
 interface SharedMilestoneTimelineProps {
   userId: string;
@@ -10,6 +10,7 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
   const [milestones, setMilestones] = useState<any[]>([]);
   const [pendingMilestones, setPendingMilestones] = useState<any[]>([]);
   const [filteredMilestones, setFilteredMilestones] = useState<any[]>([]);
+  const [participantEmails, setParticipantEmails] = useState<Record<string, string>>({});
   const [searchTerm, setSearchTerm] = useState('');
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [activeTab, setActiveTab] = useState<'active' | 'pending'>('active');
@@ -17,7 +18,6 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
   const [isMobile, setIsMobile] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Check for mobile screen size
   useEffect(() => {
     const checkScreenSize = () => {
       setIsMobile(window.innerWidth < 768);
@@ -27,61 +27,82 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
     return () => window.removeEventListener('resize', checkScreenSize);
   }, []);
 
-  // Fetch milestones from Firebase using the passed userId
   useEffect(() => {
-    const fetchMilestones = async () => {
+    const fetchMilestonesAndEmails = async () => {
       if (!userId) return;
-      
+
       setIsLoading(true);
       const db = getFirestore(app);
-      
+
       try {
         const milestonesRef = doc(db, "users", userId, "milestones", "milestoneData");
         const snapshot = await getDoc(milestonesRef);
-        
+
         if (snapshot.exists()) {
           const data = snapshot.data();
-          
-          //process accepted milestones, since shared, only need particpants where array size > 1
+
           const acceptedMilestoneArr = data.acceptedMilestones || [];
           const milestonesData = acceptedMilestoneArr
-            .filter((item: any) => (item.particpants || []).length > 0)
+            .filter((item: any) => (item.participants || []).length > 0)
             .map((item: any, index: number) => ({
-                description: item.description,
-                milestone_date: item.milestone_date,
-                createdAt: item.createdAt,
-                participants: item.participants || [],
-                particpants_addresses: item.taggedFriendIds || [],
-                id: item.id || index,
-                index,
+              description: item.description,
+              milestone_date: item.milestone_date,
+              createdAt: item.createdAt,
+              participants: item.participants || [],
+              taggedFriendIds: item.taggedFriendIds || [],
+              image: item.image || '', // Add image field
+              id: item.id || index,
+              index,
             }));
-          
-          // Sort by milestone_date
+
           milestonesData.sort(
-            (a, b) => new Date(a.milestone_date).getTime() - new Date(b.milestone_date).getTime()
+            (a: any, b: any) => new Date(a.milestone_date).getTime() - new Date(b.milestone_date).getTime()
           );
-          
+
           setMilestones(milestonesData);
           setFilteredMilestones(milestonesData);
-          
-          // Process pending milestones
+
           const pendingMilestoneArr = data.pendingMilestones || [];
           const pendingData = pendingMilestoneArr.map((item: any, index: number) => ({
             description: item.description,
             milestone_date: item.milestone_date,
             createdAt: item.createdAt,
             participants: item.participants || [],
+            taggedFriendIds: item.taggedFriendIds || [],
             proposedBy: item.owner || "Unknown",
+            image: item.image || '', // Add image field
             id: item.id || `pending-${index}`,
             index,
+            signatureCount: item.signatureCount || 0,
           }));
-          
-          // Sort pending by date
+
           pendingData.sort(
-            (a, b) => new Date(a.milestone_date).getTime() - new Date(b.milestone_date).getTime()
+            (a: any, b: any) => new Date(a.milestone_date).getTime() - new Date(b.milestone_date).getTime()
           );
-          
+
+          console.log("Pending milestones:", pendingData);
           setPendingMilestones(pendingData);
+
+          const allUids = [
+            ...new Set([
+              ...pendingData.flatMap((m) => m.taggedFriendIds || []),
+              ...milestonesData.flatMap((m) => m.taggedFriendIds || []),
+            ]),
+          ];
+          if (allUids.length > 0) {
+            const response = await fetch('/api/users/emails', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ uids: allUids }),
+            });
+
+            if (response.ok) {
+              const emailData = await response.json();
+              setParticipantEmails(emailData);
+            } else {
+              console.error("Failed to fetch participant emails:", response.statusText);
+            }
+          }
         } else {
           console.error("Milestones document does not exist.");
           setMilestones([]);
@@ -95,71 +116,94 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
       }
     };
 
-    fetchMilestones();
+    fetchMilestonesAndEmails();
   }, [userId]);
 
-  // Update card positions when window resizes or filtered milestones change
-  useEffect(() => {
+  useLayoutEffect(() => {
     const updatePositions = () => {
       if (!containerRef.current) return;
-      if (filteredMilestones.length === 0 && activeTab === 'active') return;
-      if (pendingMilestones.length === 0 && activeTab === 'pending') return;
-      
+      const activeItems = activeTab === 'active' ? filteredMilestones : pendingMilestones;
+      if (activeItems.length === 0) return;
+  
       const container = containerRef.current;
       const milestoneElements = container.querySelectorAll('.milestone-card');
       const totalMilestones = milestoneElements.length;
       const containerWidth = container.clientWidth;
       const containerHeight = container.clientHeight;
-
+  
+      if (containerWidth === 0 || containerHeight === 0) return;
+  
       if (window.innerWidth < 768) {
         milestoneElements.forEach((milestone, i) => {
-          const cardHeight = 180;
-          const verticalPos = cardHeight * i + 20 * (i + 1);
+          const cardHeight = 340; // Match max-height for mobile
+          // Reduce offset to start higher (e.g., remove or lower the 20px spacing)
+          const verticalPos = cardHeight * i + 10 * i; // Changed from + 20 * (i + 1) to + 10 * i
           (milestone as HTMLElement).style.top = `${verticalPos}px`;
           (milestone as HTMLElement).style.left = '50%';
         });
-        return;
+      } else {
+        const maxAmplitude = containerWidth * 0.3;
+        const amplitude = Math.min(maxAmplitude, Math.max(20, (window.innerWidth - 480) / 4));
+        const cardHeight = 300; // Match max-height for desktop
+        const totalSpacing = containerHeight - (cardHeight * totalMilestones);
+        const spaceBetweenCards = totalSpacing / (totalMilestones || 1); // Avoid division by zero
+  
+        milestoneElements.forEach((milestone) => {
+          const index = parseInt(milestone.getAttribute('data-index') || '0');
+          // Simplify to start higher: remove cardHeight / 2 offset
+          const verticalPos = spaceBetweenCards * index + cardHeight * index; // Changed from + cardHeight / 2
+          const sinePosition = totalMilestones > 1 ? (index / (totalMilestones - 1)) * Math.PI * 3 : 0;
+          const horizontalOffset = Math.sin(sinePosition) * amplitude;
+          const horizontalPos = 0.5 + horizontalOffset / containerWidth;
+          (milestone as HTMLElement).style.top = `${verticalPos}px`;
+          (milestone as HTMLElement).style.left = `${horizontalPos * 100}%`;
+        });
       }
-
-      // Sine wave layout for larger screens:
-      const maxAmplitude = containerWidth * 0.3;
-      const amplitude = Math.min(maxAmplitude, Math.max(20, (window.innerWidth - 480) / 4));
-      const cardHeight = 180;
-      const totalSpacing = containerHeight - (cardHeight * totalMilestones);
-      const spaceBetweenCards = totalSpacing / (totalMilestones + 5);
-
-      milestoneElements.forEach((milestone) => {
-        const index = parseInt(milestone.getAttribute('data-index') || '0');
-        const verticalPos = spaceBetweenCards * (index + 1) + cardHeight * index + cardHeight / 2;
-        const sinePosition = (index / Math.max(1, totalMilestones - 1)) * Math.PI * 3;
-        const horizontalOffset = Math.sin(sinePosition) * amplitude;
-        const horizontalPos = 0.5 + horizontalOffset / containerWidth;
-        (milestone as HTMLElement).style.top = `${verticalPos}px`;
-        (milestone as HTMLElement).style.left = `${horizontalPos * 100}%`;
-      });
     };
-    
-    updatePositions();
-    window.addEventListener('resize', updatePositions);
-    return () => window.removeEventListener('resize', updatePositions);
+  
+    const debounce = (func: Function, wait: number) => {
+      let timeout: NodeJS.Timeout;
+      return (...args: any[]) => {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func(...args), wait);
+      };
+    };
+  
+    const debouncedUpdatePositions = debounce(updatePositions, 50);
+  
+    const initializePositions = () => {
+      if (!containerRef.current || containerRef.current.clientWidth === 0) {
+        requestAnimationFrame(initializePositions);
+      } else {
+        updatePositions();
+      }
+    };
+  
+    initializePositions();
+    window.addEventListener('resize', debouncedUpdatePositions);
+    window.addEventListener('pageshow', updatePositions);
+  
+    return () => {
+      window.removeEventListener('resize', debouncedUpdatePositions);
+      window.removeEventListener('pageshow', updatePositions);
+    };
   }, [filteredMilestones, pendingMilestones, activeTab]);
 
-  // Filter milestones by description and date range
   useEffect(() => {
     if (activeTab === 'active') {
       let filtered = [...milestones];
       if (searchTerm) {
-        filtered = filtered.filter(milestone =>
+        filtered = filtered.filter((milestone) =>
           milestone.description.toLowerCase().includes(searchTerm.toLowerCase())
         );
       }
       if (dateRange.start) {
         const startDate = new Date(dateRange.start);
-        filtered = filtered.filter(milestone => new Date(milestone.milestone_date) >= startDate);
+        filtered = filtered.filter((milestone) => new Date(milestone.milestone_date) >= startDate);
       }
       if (dateRange.end) {
         const endDate = new Date(dateRange.end);
-        filtered = filtered.filter(milestone => new Date(milestone.milestone_date) <= endDate);
+        filtered = filtered.filter((milestone) => new Date(milestone.milestone_date) <= endDate);
       }
       setFilteredMilestones(filtered);
     }
@@ -171,57 +215,51 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
 
   const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    setDateRange(prev => ({ ...prev, [name]: value }));
+    setDateRange((prev) => ({ ...prev, [name]: value }));
   };
 
   const handleAcceptMilestone = async (pendingMilestone: any) => {
     if (!userId) return;
-    
+
     setIsLoading(true);
-    const db = getFirestore(app);
-    
+
     try {
-      const milestonesRef = doc(db, "users", userId, "milestones", "milestoneData");
-      const snapshot = await getDoc(milestonesRef);
-      
-      if (snapshot.exists()) {
-        const data = snapshot.data();
-        
-        // Find the pending milestone
-        const pendingArray = data.pendingMilestones || [];
-        const acceptedArray = data.acceptedMilestones || [];
-        
-        // Find the pending milestone index
-        const pendingIndex = pendingArray.findIndex((item: any) => item.id === pendingMilestone.id);
-        
-        if (pendingIndex !== -1) {
-          // Move from pending to accepted
-          const milestone = pendingArray[pendingIndex];
-          acceptedArray.push(milestone);
-          pendingArray.splice(pendingIndex, 1);
-          
-          // Update the document
-          await updateDoc(milestonesRef, {
-            acceptedMilestones: acceptedArray,
-            pendingMilestones: pendingArray
-          });
-          
-          // Update local state
-          setPendingMilestones(prev => prev.filter(item => item.id !== pendingMilestone.id));
-          
-          // Add to milestones with isShared flag
-          const newMilestone = {
-            ...pendingMilestone,
-            isShared: (pendingMilestone.participants || []).length > 1
-          };
-          
-          setMilestones(prev => [...prev, newMilestone].sort(
-            (a, b) => new Date(a.milestone_date).getTime() - new Date(b.milestone_date).getTime()
-          ));
-        }
+      const response = await fetch('/api/milestone/accept', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          milestoneId: pendingMilestone.id,
+          ownerUid: pendingMilestone.proposedBy || "Unknown",
+          participants: pendingMilestone.participants || [],
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.message || 'Failed to accept milestone');
       }
-    } catch (error) {
+
+      setPendingMilestones((prev) => prev.filter((item) => item.id !== pendingMilestone.id));
+
+      if (result.isFinalized) {
+        const newMilestone = {
+          ...pendingMilestone,
+          isShared: (pendingMilestone.participants || []).length > 1,
+          isPending: false,
+          transactionHash: result.transactionHash,
+        };
+        setMilestones((prev) =>
+          [...prev, newMilestone].sort(
+            (a, b) => new Date(a.milestone_date).getTime() - new Date(b.milestone_date).getTime()
+          )
+        );
+      }
+
+      alert('Milestone accepted successfully!');
+    } catch (error: any) {
       console.error("Error accepting milestone:", error);
+      alert(`Failed to accept milestone: ${error.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -229,38 +267,31 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
 
   const handleDenyMilestone = async (pendingMilestone: any) => {
     if (!userId) return;
-    
+
     setIsLoading(true);
-    const db = getFirestore(app);
-    
+
     try {
-      const milestonesRef = doc(db, "users", userId, "milestones", "milestoneData");
-      const snapshot = await getDoc(milestonesRef);
-      
-      if (snapshot.exists()) {
-        const data = snapshot.data();
-        
-        // Find the pending milestone
-        const pendingArray = data.pendingMilestones || [];
-        
-        // Find the pending milestone index
-        const pendingIndex = pendingArray.findIndex((item: any) => item.id === pendingMilestone.id);
-        
-        if (pendingIndex !== -1) {
-          // Remove from pending
-          pendingArray.splice(pendingIndex, 1);
-          
-          // Update the document
-          await updateDoc(milestonesRef, {
-            pendingMilestones: pendingArray
-          });
-          
-          // Update local state
-          setPendingMilestones(prev => prev.filter(item => item.id !== pendingMilestone.id));
-        }
+      const response = await fetch('/api/milestone/decline', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          milestoneId: pendingMilestone.id,
+          ownerUid: pendingMilestone.proposedBy || "Unknown",
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.message || 'Failed to decline milestone');
       }
-    } catch (error) {
-      console.error("Error denying milestone:", error);
+
+      setPendingMilestones((prev) => prev.filter((item) => item.id !== pendingMilestone.id));
+
+      alert('Milestone declined successfully!');
+    } catch (error: any) {
+      console.error("Error declining milestone:", error);
+      alert(`Failed to decline milestone: ${error.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -268,14 +299,13 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
 
   const activeDisplayItems = activeTab === 'active' ? filteredMilestones : pendingMilestones;
   const containerHeight = isMobile
-    ? activeDisplayItems.length * 220  
-    : activeDisplayItems.length * 200 + 200;
+    ? activeDisplayItems.length * 360 // Increased to account for taller cards
+    : activeDisplayItems.length * 320 + 200; // Adjusted for desktop
 
   return (
     <div className="container mx-auto px-4 py-8">
       <h1 className="text-3xl font-bold text-white mb-6">Shared Milestones</h1>
-      
-      {/* Tab Navigation */}
+
       <div className="flex border-b border-purple-500/30 mb-6">
         <button
           onClick={() => setActiveTab('active')}
@@ -303,8 +333,7 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
           )}
         </button>
       </div>
-      
-      {/* Filter Controls - Only show for active tab */}
+
       {activeTab === 'active' && (
         <div className="mb-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <div>
@@ -347,8 +376,11 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
             />
           </div>
           <div className="flex items-end">
-            <button 
-              onClick={() => { setSearchTerm(''); setDateRange({ start: '', end: '' }); }}
+            <button
+              onClick={() => {
+                setSearchTerm('');
+                setDateRange({ start: '', end: '' });
+              }}
               className="w-full bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors"
             >
               Clear Filters
@@ -365,99 +397,117 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
       ) : (
         <>
           {activeTab === 'active' && filteredMilestones.length === 0 && (
-            <div className="text-center py-8 text-gray-400">
-              No milestones found matching your filters.
-            </div>
+            <div className="text-center py-8 text-gray-400">No milestones found matching your filters.</div>
           )}
-          
+
           {activeTab === 'pending' && pendingMilestones.length === 0 && (
-            <div className="text-center py-8 text-gray-400">
-              No pending milestones to review.
-            </div>
+            <div className="text-center py-8 text-gray-400">No pending milestones to review.</div>
           )}
-          
-          {/* Timeline Container */}
-          <div 
-            className="relative w-full my-10" 
-            style={{ height: `${containerHeight}px` }}
-            ref={containerRef}
-          >
+
+          <div className="relative w-full my-10" style={{ height: `${containerHeight}px` }} ref={containerRef}>
             <div className="hidden lg:block absolute top-0 left-1/2 h-full w-0.5 bg-purple-500/30 transform -translate-x-1/2"></div>
-            
+
             <div className="milestone-container">
-              {activeTab === 'active' && filteredMilestones.map((milestone, index) => (
-                <div 
-                  key={milestone.id} 
-                  className="milestone-card" 
-                  data-index={index}
-                >
-                  <div className={`bg-[#1a1a1a] p-6 rounded-xl shadow-lg border ${milestone.isShared ? 'border-purple-500/50' : 'border-purple-500/20'} transition-all duration-300 ${isMobile ? 'w-full max-w-sm' : 'w-[280px]'}`}>
-                    {milestone.isShared && (
+              {activeTab === 'active' &&
+                filteredMilestones.map((milestone, index) => (
+                  <div key={milestone.id} className="milestone-card" data-index={index}>
+                    <div
+                      className={`bg-[#1a1a1a] p-6 rounded-xl shadow-lg border ${
+                        milestone.isShared ? 'border-purple-500/50' : 'border-purple-500/20'
+                      } transition-all duration-300 ${isMobile ? 'w-full max-w-md' : 'w-[360px]'}`}
+                    >
+                      {milestone.isShared && (
+                        <div className="mb-2 flex items-center">
+                          <span className="bg-purple-500/20 text-purple-300 text-xs px-2 py-1 rounded-full">
+                            Shared
+                          </span>
+                        </div>
+                      )}
+                      {milestone.image && (
+                        <img
+                          src={milestone.image}
+                          alt={milestone.description}
+                          className="w-full h-40 object-cover rounded-md mb-2"
+                        />
+                      )}
+                      <p className="text-white text-lg font-medium mb-2 truncate">{milestone.description}</p>
+                      <p className="text-gray-400 mb-1">
+                        Date: {new Date(milestone.milestone_date).toLocaleDateString('en-US')}
+                      </p>
+                      <p className="text-gray-400 mb-1 break-words">
+                        Participants:{' '}
+                        {(milestone.taggedFriendIds || []).map((uid: string, i: number) => (
+                          <span key={uid}>
+                            {participantEmails[uid] || 'Unknown'} ({milestone.participants[i] || 'No public key'})
+                            {i < milestone.taggedFriendIds.length - 1 ? ', ' : ''}
+                          </span>
+                        ))}
+                      </p>
+                      <p className="text-gray-400">
+                        Created: {new Date(milestone.createdAt).toLocaleString('en-US')}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+
+              {activeTab === 'pending' &&
+                pendingMilestones.map((milestone, index) => (
+                  <div key={milestone.id} className="milestone-card" data-index={index}>
+                    <div
+                      className={`bg-[#1a1a1a] p-6 rounded-xl shadow-lg border border-yellow-500/30 transition-all duration-300 ${
+                        isMobile ? 'w-full max-w-md' : 'w-[360px]'
+                      }`}
+                    >
                       <div className="mb-2 flex items-center">
-                        <span className="bg-purple-500/20 text-purple-300 text-xs px-2 py-1 rounded-full">
-                          Shared
+                        <span className="bg-yellow-500/20 text-yellow-300 text-xs px-2 py-1 rounded-full">
+                          Pending Approval
                         </span>
                       </div>
-                    )}
-                    <p className="text-white text-lg font-medium mb-2">
-                      {milestone.description}
-                    </p>
-                    <p className="text-gray-400 mb-1">
-                      Date: {new Date(milestone.milestone_date).toLocaleDateString('en-US')}
-                    </p>
-                    <p className="text-gray-400 mb-1">
-                      Participants: {milestone.participants?.length || 1}
-                    </p>
-                    <p className="text-gray-400">
-                      Created: {new Date(milestone.createdAt).toLocaleString('en-US')}
-                    </p>
-                  </div>
-                </div>
-              ))}
-              
-              {activeTab === 'pending' && pendingMilestones.map((milestone, index) => (
-                <div 
-                  key={milestone.id} 
-                  className="milestone-card" 
-                  data-index={index}
-                >
-                  <div className={`bg-[#1a1a1a] p-6 rounded-xl shadow-lg border border-yellow-500/30 transition-all duration-300 ${isMobile ? 'w-full max-w-sm' : 'w-[280px]'}`}>
-                    <div className="mb-2 flex items-center">
-                      <span className="bg-yellow-500/20 text-yellow-300 text-xs px-2 py-1 rounded-full">
-                        Pending Approval
-                      </span>
-                    </div>
-                    <p className="text-white text-lg font-medium mb-2">
-                      {milestone.description}
-                    </p>
-                    <p className="text-gray-400 mb-1">
-                      Date: {new Date(milestone.milestone_date).toLocaleDateString('en-US')}
-                    </p>
-                    <p className="text-gray-400 mb-1">
-                      Proposed by: {milestone.proposedBy}
-                    </p>
-                    <p className="text-gray-400 mb-3">
-                      Participants: {milestone.participants?.length || 1}
-                    </p>
-                    <div className="flex space-x-2 mt-2">
-                      <button 
-                        onClick={() => handleAcceptMilestone(milestone)}
-                        disabled={isLoading}
-                        className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex-1"
-                      >
-                        Accept
-                      </button>
-                      <button 
-                        onClick={() => handleDenyMilestone(milestone)}
-                        disabled={isLoading}
-                        className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors flex-1"
-                      >
-                        Deny
-                      </button>
+                      {milestone.image && (
+                        <img
+                          src={milestone.image}
+                          alt={milestone.description}
+                          className="w-full h-40 object-cover rounded-md mb-2"
+                        />
+                      )}
+                      <p className="text-white text-lg font-medium mb-2 truncate">{milestone.description}</p>
+                      <p className="text-gray-400 mb-1">
+                        Date: {new Date(milestone.milestone_date).toLocaleDateString('en-US')}
+                      </p>
+                      <p className="text-gray-400 mb-1">Proposed by: {milestone.proposedBy}</p>
+                      <p className="text-gray-400 mb-1 break-words">
+                        Participants:{' '}
+                        {(milestone.taggedFriendIds || []).map((uid: string, i: number) => (
+                          <span key={uid}>
+                            {participantEmails[uid] || 'Unknown'} ({milestone.participants[i] || 'No public key'})
+                            {i < milestone.taggedFriendIds.length - 1 ? ', ' : ''}
+                          </span>
+                        ))}
+                      </p>
+                      <p className="text-gray-400 mb-3">
+                        Signatures: {milestone.signatureCount}/{milestone.taggedFriendIds?.length || 0}
+                      </p>
+                      {milestone.proposedBy !== userId && (
+                        <div className="flex space-x-2 mt-2">
+                          <button
+                            onClick={() => handleAcceptMilestone(milestone)}
+                            disabled={isLoading}
+                            className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex-1"
+                          >
+                            Accept
+                          </button>
+                          <button
+                            onClick={() => handleDenyMilestone(milestone)}
+                            disabled={isLoading}
+                            className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors flex-1"
+                          >
+                            Deny
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
-                </div>
-              ))}
+                ))}
             </div>
           </div>
         </>
@@ -467,7 +517,6 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
   );
 };
 
-// CSS for the component
 const styles = `
   .milestone-container {
     position: relative;
@@ -481,10 +530,28 @@ const styles = `
     transform: translateX(-50%);
   }
   
+  .milestone-card > div {
+    max-height: 300px; /* Increased for desktop */
+    overflow-x: hidden; /* No horizontal scroll */
+    overflow-y: auto; /* Vertical scroll only */
+  }
+  
+  .truncate {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  
+  .break-words {
+    overflow-wrap: break-word;
+    word-break: break-all;
+  }
+  
   @media (max-width: 767px) {
     .milestone-card > div {
       width: 90vw;
-      max-width: 330px;
+      max-width: 32rem; /* max-w-md */
+      max-height: 340px; /* Increased for mobile */
     }
   }
 `;
