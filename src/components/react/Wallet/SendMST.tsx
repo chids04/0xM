@@ -10,9 +10,10 @@ import type { Friend } from "../ClientTagFriendDropdown";
 interface SendMSTProps {
   friends: Friend[];
   senderAddress: string;
+  currentUser: any
 }
 
-export function SendMST({ friends, senderAddress }: SendMSTProps) {
+export function SendMST({ friends, senderAddress, currentUser}: SendMSTProps) {
   const [selectedFriend, setSelectedFriend] = useState<Friend | null>(null);
   const [recipientAddress, setRecipientAddress] = useState<string>("");
   const [amount, setAmount] = useState<string>("0");
@@ -84,6 +85,7 @@ export function SendMST({ friends, senderAddress }: SendMSTProps) {
         body: JSON.stringify({
           senderAddress,
           recipientAddress,
+          currentUser,
           amount: parseFloat(amount)
         })
       });

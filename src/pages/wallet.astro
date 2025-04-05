@@ -78,7 +78,7 @@ if (friendIds.length > 0) {
                     <WalletBalance client:load walletAddress={walletAddress} />
                 </div>
                 <div>
-                    <SendMST client:load friends={friends} senderAddress={walletAddress} />
+                    <SendMST client:load friends={friends} senderAddress={walletAddress} currentUser={user}/>
                 </div>
             </div>
         ) : (

@@ -128,6 +128,14 @@ export const POST: APIRoute = async ({ request }) => {
 
             const receipt = await tx.wait()
 
+            //also need to fund with some eth to approve transactions
+            const fundTx = await admin.sendTransaction({
+                to: wallet.address,
+                value: ethers.parseEther("0.001")
+            })
+
+            await fundTx.wait()
+
             if(receipt.status !== 1){
                 throw new Error("Failed to mint MST token")
             }
