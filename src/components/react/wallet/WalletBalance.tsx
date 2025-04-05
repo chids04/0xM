@@ -3,13 +3,17 @@
 import React, { useEffect, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { ethers } from 'ethers'
+import { getFirestore } from "firebase/firestore"
+import { app } from "../../../firebase/client"
+import { doc, updateDoc } from "firebase/firestore";
 
 interface WalletBalanceProps {
   walletAddress: string  // Required prop
+  currentUser: any
 }
 
 // Accept the prop with destructuring
-export function WalletBalance({ walletAddress }: WalletBalanceProps) {
+export function WalletBalance({ walletAddress, currentUser }: WalletBalanceProps) {
     const [balance, setBalance] = useState(0);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
@@ -34,6 +38,11 @@ export function WalletBalance({ walletAddress }: WalletBalanceProps) {
 
                 if (data) {
                     // Convert from wei to ether and then to number
+                    const db = getFirestore(app)
+
+                    const userDocRef = doc(db, "users", currentUser.uid, "wallet", "wallet_info");
+                    await updateDoc(userDocRef, { balance: parseFloat(data.balance) });
+                    
                     setBalance(parseFloat(data.balance));
                 } else {
                     throw new Error(data.error || 'Failed to get balance');

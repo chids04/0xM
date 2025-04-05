@@ -66,7 +66,7 @@ export const POST: APIRoute = async ({ request }) => {
         
         // Parse request body
         const body = await request.json();
-        const { senderAddress, recipientAddress, amount, currentUser } = body;
+        const { senderAddress, recipientAddress, amount, currentUser, friendUser } = body;
 
         // Validate required parameters
         if (!senderAddress || !recipientAddress || !amount || !currentUser) {
@@ -266,7 +266,21 @@ export const POST: APIRoute = async ({ request }) => {
             // Update balance in Firebase
             await db.collection("users").doc(currentUser.uid).collection("wallet").doc("wallet_info").update({
                 balance: formattedBalance
+
             });
+
+            // Add transaction details to a global transactions collection
+            const transactionRef = db.collection("transactions").doc();
+            await transactionRef.set({
+                from: senderAddress,
+                to: recipientAddress,
+                amount: amountToSend.toString(),
+                timestamp: new Date().toISOString(),
+                txHash: receipt.hash
+            });
+
+            // Add a reference to the transaction in the sender's user document
+            
             
             return new Response(
                 JSON.stringify({ 

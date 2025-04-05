@@ -86,6 +86,7 @@ export function SendMST({ friends, senderAddress, currentUser}: SendMSTProps) {
           senderAddress,
           recipientAddress,
           currentUser,
+          friendUser: selectedFriend,
           amount: parseFloat(amount)
         })
       });
