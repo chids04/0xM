@@ -6,7 +6,10 @@ import { app } from "../../../firebase/server";
 import { getAuth } from "firebase-admin/auth";
 import { defineCollection } from "astro:content";
 import { datetimeRegex } from "astro:schema";
-
+import { readFileSync } from "fs";
+import { join } from "path";
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 
 //if a new user, we create a wallet key pair and store some user e-mail and account creation date
 
@@ -15,10 +18,10 @@ const ENCRYPTION_KEY: string = import.meta.env.ENCRYPTION_KEY
 if(!ENCRYPTION_KEY){
     throw new Error("missing encryption key");
 }
-
+    
 const IV: string = import.meta.env.ENCRYPTION_IV;
 if(!IV){
-  throw new Error("missing initalization vector");
+    throw new Error("missing initalization vector");
 }
 
 /**
@@ -28,7 +31,6 @@ if(!IV){
  */
 
 function encryptPrivateKey(privateKey: string): string {
-    
     const key = Buffer.from(ENCRYPTION_KEY, 'hex'); // Ensure key is hex-encoded
 
     if (key.length !== 32) {
@@ -44,70 +46,151 @@ function encryptPrivateKey(privateKey: string): string {
     let encrypted = cipher.update(privateKey, "utf8", "hex");
     encrypted += cipher.final("hex");
     return `${IV}:${encrypted}`;
-  }
+}
   
 export const POST: APIRoute = async ({ request }) => {
-  try {
-    const db = getFirestore(app);
-    const auth = getAuth(app);
+    try {
+        const db = getFirestore(app);
+        const auth = getAuth(app);
 
-    const body = await request.json();
-    const userId = body?.uid;
+        // Validation checks grouped together
+        const body = await request.json();
+        const userId = body?.uid;
+        if (!userId) {
+            return createErrorResponse("VALIDATION_ERROR", "Missing user ID", 400);
+        }
 
-    if (!userId) {
-      return new Response("Missing user ID", { status: 400 });
+        // Environment variable checks grouped together
+        const admin_adr = import.meta.env.ADMIN_ADDRESS;
+        const token_adr = import.meta.env.MST_TOKEN_ADDRESS;
+        const admin_priv = import.meta.env.ADMIN_PRIV_KEY
+        if (!admin_adr || !token_adr || !admin_priv) {
+            return createErrorResponse("CONFIG_ERROR", "Missing blockchain configuration", 500);
+        }
+
+        // ABI loading with proper error handling
+        const abiStoragePath = import.meta.env.MST_TOKEN_ABI;
+        let token_abi;
+        if (!abiStoragePath) {
+            return createErrorResponse("CONFIG_ERROR", "Missing token contract ABI path", 500);
+        }
+        try {
+            const __filename = fileURLToPath(import.meta.url);
+            const __dirname = dirname(__filename);
+
+            const projectRoot = join(__dirname, '../../../../blockchain');
+            const artifact = JSON.parse(readFileSync(join(projectRoot, abiStoragePath), 'utf8'));
+            token_abi = artifact.abi
+        } catch (error) {
+            console.error("ABI loading error:", error);
+            return createErrorResponse("BLOCKCHAIN_ERROR", "Failed to load token ABI", 500);
+        }
+
+        // Firebase operations in a separate try/catch
+        let user_email;
+        try {
+            const user_rec = await auth.getUser(userId);
+            user_email = user_rec.email;
+        } catch (error) {
+            console.error("Firebase auth error:", error);
+            return createErrorResponse("AUTH_ERROR", "Failed to get user from Firebase", 500);
+        }
+
+        // Wallet creation with specific error handling
+        let provider
+        let admin: ethers.Wallet
+        try{
+            provider = new ethers.JsonRpcProvider(
+                import.meta.env.ETHEREUM_RPC_URL || "http://localhost:8545"
+            );
+            admin = new ethers.Wallet(admin_priv, provider)
+        } catch(error){
+            console.error("Error finding Ethereum node")
+            return createErrorResponse("BLOCKCHAIN_ERROR", "Failed to connect to ethereum node", 500)
+        }
+
+        let wallet, publicKey, formattedBal;
+        try {
+            wallet = ethers.Wallet.createRandom(provider);
+            publicKey = wallet.address;
+
+            //need to fund the account with mst here
+            const token_contract = new ethers.Contract(
+                token_adr,
+                token_abi,
+                admin
+            )
+            
+            const tx = await token_contract.mint(
+                wallet.address,
+                ethers.parseEther("100")
+            )
+
+            const receipt = await tx.wait()
+
+            if(receipt.status !== 1){
+                throw new Error("Failed to mint MST token")
+            }
+
+            const bal = await token_contract.balanceOf(wallet.address)
+            formattedBal = ethers.formatEther(bal)
+
+        } catch (error) {
+            console.error("Wallet creation error:", error);
+            return createErrorResponse("BLOCKCHAIN_ERROR", "Failed to create wallet", 500);
+        }
+
+        // Database operations with specific error handling
+        try {
+            const batch = db.batch();
+
+            const userRef = db.collection("users").doc(userId);
+            batch.set(userRef, {
+                email: user_email,
+                creationDate: new Date()
+            });
+
+            const walletRef = db.collection("users").doc(userId).collection("wallet").doc("wallet_info");
+            batch.set(walletRef, {
+                publicKey,
+                encryptedPrivateKey: encryptPrivateKey(wallet.privateKey),
+                balance: formattedBal
+            });
+
+            await batch.commit();
+        } catch (error) {
+            console.error("Firestore error:", error);
+            return createErrorResponse("DATABASE_ERROR", "Failed to save wallet information", 500);
+        }
+        
+        return new Response(
+            JSON.stringify({ success: true, publicKey }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+    } catch (error) {
+        // Fallback error handler
+        console.error("Unhandled error in wallet creation:", error);
+        return createErrorResponse("UNKNOWN_ERROR", "Failed to create wallet", 500);
     }
-
-    //get user email
-    let user_email;
-    try{
-      const user_rec = await auth.getUser(userId)
-      user_email = user_rec.email
-    }
-    catch(error){
-      if (error instanceof Error) {
-        console.log("error getting user email from firebase" + error.message);
-      }
-
-      return new Response("failed to get user from firebase", { status: 500 })
-    }
-
-    // Create a random Ethereum wallet
-    const wallet = ethers.Wallet.createRandom();
-    const publicKey = wallet.address;
-
-    //batch the transactions so it is atomic, cant have user email and no wallet
-
-    const batch = db.batch()
-
-    const userRef = db.collection("users").doc(userId)
-    batch.set(userRef, {
-      email: user_email,
-      creationDate: new Date()
-    })
-
-    // Store wallet in Firestore
-    const walletRef = db.collection("users").doc(userId).collection("wallet").doc("wallet_info")
-    batch.set(walletRef, {
-      publicKey,
-      encryptedPrivateKey: encryptPrivateKey(wallet.privateKey),
-    });
-
-    await batch.commit()
-    
-    return new Response(
-      JSON.stringify({ success: true, publicKey }),
-      { status: 200, headers: { "Content-Type": "application/json" } }
-    );
-  } catch (error) {
-    console.error("Error in user creation process:", error);
-    // You can check for specific error types if needed
-    if (error instanceof Error) {
-      if (error.message.includes("Encryption key must be 32 bytes") || 
-          error.message.includes("IV must be 16 bytes")) {
-        return new Response("Server error", { status: 500 });
-      }
-    }
-    return new Response("Failed to create wallet", { status: 500 });
-  }
 };
+
+/**
+ * Creates a standardized error response
+ */
+function createErrorResponse(
+    code: string, 
+    message: string, 
+    status: number
+) {
+    console.error(`${code}: ${message}`);
+    return new Response(
+        JSON.stringify({ 
+            success: false, 
+            error: { code, message } 
+        }),
+        { 
+            status, 
+            headers: { "Content-Type": "application/json" } 
+        }
+    );
+}

@@ -1,13 +1,88 @@
 ---
 import Layout from "../layouts/Navbar.astro";
+import { getFirestore } from "firebase-admin/firestore"
+import { getAuth } from "firebase-admin/auth"
+import { WalletBalance } from "@/components/react/wallet/WalletBalance"
+import { SendMST } from "@/components/react/wallet/SendMST"
+
+import { app } from "../firebase/server"
 
 const user = Astro.locals.user
+
+
+//could also add a check here which checks if account is managed or not
+
+interface Friend {
+  uid: string;
+  displayName: string;
+  email: string;
+  photoURL: string;
+}
+
+let friends: Friend[] = [];
+
+let friendIds: string[] = [];
+let walletAddress
+
+const db = getFirestore(app)
+const auth = getAuth(app)
+const walletRef = db.collection("users").doc(user.uid).collection("wallet").doc("wallet_info")
+const walletDoc = await walletRef.get()
+const walletData = walletDoc.data()
+
+if(walletData){
+    walletAddress = walletData.publicKey;
+}
+
+const requestStatusDoc = await db
+  .collection("users")
+  .doc(user.uid)
+  .collection("friends")
+  .doc("request-status")
+  .get();
+if (requestStatusDoc.exists) {
+  const requestData = requestStatusDoc.data();
+  friendIds = requestData?.acceptedRequests || [];
+}
+
+if (friendIds.length > 0) {
+  friends = (await Promise.all(
+    friendIds.map(async (id) => {
+      try {
+        const friend = await auth.getUser(id);
+        return {
+          uid: id,
+          displayName: friend.displayName || "User",
+          email: friend.email,
+          photoURL:
+            friend.photoURL ||
+            `https://api.dicebear.com/7.x/initials/svg?seed=${friend.displayName || friend.email || id}`,
+        };
+      } catch (e) {
+        console.error(e);
+        return null;
+      }
+    })
+  )).filter((friend): friend is Friend => friend !== null);
+}
+
+
 ---
 
-<Layout title = "Wallet" user={user}>
-    <div class="conatiner mx-auto py-8">
-        <h1 class="text-3xl font-bold text-whute mb-8">MST Wallet</h1>
-        
+<Layout title="Wallet" user={user}>
+    <div class="container mx-auto py-8 px-4">
+        <h1 class="text-3xl font-bold text-white mb-8">Wallet</h1>
+        {walletAddress ? (
+            <div class="grid grid-cols-1 gap-8 md:grid-cols-2">
+                <div>
+                    <WalletBalance client:load walletAddress={walletAddress} />
+                </div>
+                <div>
+                    <SendMST client:load friends={friends} senderAddress={walletAddress} />
+                </div>
+            </div>
+        ) : (
+            <p class="text-gray-400">Wallet address not found.</p>
+        )}
     </div>
-
 </Layout>

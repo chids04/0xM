@@ -15,7 +15,7 @@ const sessionCookie = Astro.cookies.get("__session")?.value;
 if(sessionCookie){
   try{
     const decodedCookie = await auth.verifySessionCookie(sessionCookie);
-    return Astro.redirect("/dashboard");
+    return Astro.redirect("/profile");
   }
   catch (error) {
     // If verification fails, allow the page to render.

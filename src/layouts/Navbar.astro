@@ -121,8 +121,7 @@ const userPhotoURL = "https://api.dicebear.com/7.x/initials/svg?seed=" + user.di
                 <div class="fixed top-0 right-0 pt-4 pr-8">
                   <UserCard 
                   client:load 
-                  userName={user.displayName ?? ""} 
-                  walletBalance= "1.25 ETH"
+                  user={user} 
                   photoURL={userPhotoURL} 
                   />
                 </div>
