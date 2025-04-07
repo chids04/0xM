@@ -21,16 +21,19 @@ export function SendMST({ friends, senderAddress, currentUser}: SendMSTProps) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // Reset success/error messages when form changes
+  // Only clear messages after a delay to ensure they're seen
   useEffect(() => {
-    setError(null);
-    setSuccess(null);
-  }, [recipientAddress, amount, selectedFriend]);
+    if (success || error) {
+      const timer = setTimeout(() => {
+        setError(null);
+        setSuccess(null);
+      }, 5000); // Messages stay for 5 seconds
+      return () => clearTimeout(timer);
+    }
+  }, [success, error]);
 
-  // Update recipient address when a friend is selected
   useEffect(() => {
     if (selectedFriend) {
-      // First check if the selectedFriend already has a wallet address (from a separate API call)
       fetchFriendWalletAddress(selectedFriend.uid);
     }
   }, [selectedFriend]);
@@ -42,19 +45,26 @@ export function SendMST({ friends, senderAddress, currentUser}: SendMSTProps) {
         headers: { 'Content-Type': 'application/json' }
       });
       
-      if (response.ok) {
-        const data = await response.json();
-        if (data.address) {
-          setRecipientAddress(data.address);
-        }
+      if (!response.ok) {
+        throw new Error('Failed to fetch wallet address');
+      }
+      
+      const data = await response.json();
+      if (data.address) {
+        setRecipientAddress(data.address);
+      } else {
+        setError("No wallet address found for this friend");
       }
     } catch (error) {
       console.error("Error fetching friend's wallet address:", error);
+      setError("Failed to fetch friend's wallet address");
     }
   };
 
   const handleFriendSelect = (friend: Friend) => {
     setSelectedFriend(friend);
+    setError(null);
+    setSuccess(null);
   };
 
   const validateForm = (): boolean => {
@@ -101,7 +111,7 @@ export function SendMST({ friends, senderAddress, currentUser}: SendMSTProps) {
       setAmount("0");
       setRecipientAddress("");
       setSelectedFriend(null);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error sending tokens:', error);
       setError(error.message || 'Failed to send tokens');
     } finally {
@@ -111,13 +121,13 @@ export function SendMST({ friends, senderAddress, currentUser}: SendMSTProps) {
 
   return (
     <Card className="bg-[#1a1a1a] border border-purple-500/20 shadow-lg overflow-hidden">
-    <CardHeader className="border-b border-[#333333] pb-4">
-      <CardTitle className="text-white text-xl">Send Milestone Token</CardTitle>
-    </CardHeader>
+      <CardHeader className="border-b border-[#333333] pb-4">
+        <CardTitle className="text-white text-xl">Send Milestone Token</CardTitle>
+      </CardHeader>
       
       <CardContent className="p-6 space-y-4">
-        {/* Friend Selection - only shown if friends exist */}
-        {friends.length > 0 ? (
+        {/* Friend Selection */}
+        {friends.length > 0 && (
           <div className="space-y-2">
             <label className="block text-gray-300 text-sm font-medium mb-1">
               Select Friend
@@ -144,7 +154,7 @@ export function SendMST({ friends, senderAddress, currentUser}: SendMSTProps) {
               </div>
             )}
           </div>
-        ) : null}
+        )}
         
         {/* Manual Address Input */}
         <div className="space-y-2">
@@ -161,7 +171,7 @@ export function SendMST({ friends, senderAddress, currentUser}: SendMSTProps) {
           />
           <p className="text-xs text-gray-500">
             {selectedFriend ? "Address auto-filled from selected friend" : 
-             friends.length > 0 ? "Enter the recipient's address manually or select a friend above" : 
+             friends.length > 0 ? "Enter manually or select a friend above" : 
              "Enter the recipient's wallet address"}
           </p>
         </div>
@@ -186,16 +196,24 @@ export function SendMST({ friends, senderAddress, currentUser}: SendMSTProps) {
           </div>
         </div>
         
-        {/* Error/Success Messages */}
-        {error && (
-          <div className="p-3 bg-red-900/30 text-red-400 rounded-md text-sm">
-            {error}
-          </div>
-        )}
-        
-        {success && (
-          <div className="p-3 bg-green-900/30 text-green-400 rounded-md text-sm">
-            {success}
+        {/* Enhanced Messages */}
+        {(error || success) && (
+          <div 
+            className={`p-4 rounded-md text-sm transition-all duration-300 ${
+              error ? 'bg-red-900/50 text-red-300 border border-red-500/30' : 
+              'bg-green-900/50 text-green-300 border border-green-500/30'
+            }`}
+          >
+            {error || success}
+            <button
+              className="ml-2 text-xs opacity-75 hover:opacity-100"
+              onClick={() => {
+                setError(null);
+                setSuccess(null);
+              }}
+            >
+              ×
+            </button>
           </div>
         )}
       </CardContent>

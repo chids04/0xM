@@ -1,15 +1,13 @@
 ---
 import Layout from "../layouts/Navbar.astro";  // Use the Navbar layout
-import SharedMilestoneTimeline from "@/components/react/PersonalMilestones";
+import MilestoneTimeline from "@/components/react/PersonalMilestones";
 
 const user = await Astro.locals.user
 ---
 
 <Layout title = "Shared Milestones" user={user}>
-<SharedMilestoneTimeline client:visible userId={user.uid}></SharedMilestoneTimeline>
+<MilestoneTimeline client:visible userId={user.uid}></MilestoneTimeline>
 </Layout>
-
-
 
 <script>
 

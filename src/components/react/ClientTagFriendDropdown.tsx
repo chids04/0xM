@@ -32,30 +32,6 @@ export function ClientTagFriendDropdown({ friends, onTagSelect, onRemoveTag }: C
     onRemoveTag && onRemoveTag(friend);
   };
 
-  return (
-    <>
-      <TagFriendDropdown friends={friends} onSelect={handleTagSelect} />
-      {taggedFriends.length > 0 && (
-        <div className="mt-2 space-y-1">
-          <p className="text-white">Tagged Friends:</p>
-          {taggedFriends.map((friend) => (
-            <div key={friend.uid} className="flex items-center gap-2">
-              <img
-                src={friend.photoURL}
-                alt={friend.displayName}
-                className="w-6 h-6 rounded-full border border-[#333333]"
-              />
-              <span className="text-white">{friend.displayName}</span>
-              <button
-                onClick={() => handleRemove(friend)}
-                className="text-red-500 text-xs hover:underline"
-              >
-                Remove
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-    </>
-  );
+  // Only return the dropdown itself, without the list of tagged friends
+  return <TagFriendDropdown friends={friends} onSelect={handleTagSelect} />;
 }

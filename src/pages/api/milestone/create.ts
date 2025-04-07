@@ -5,14 +5,24 @@ import { getAuth } from "firebase-admin/auth";
 import { ethers } from "ethers";
 import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
-import milestoneTrackerABI from "../../../contracts/MilestonTrackerABI.json";
+import { readFileSync } from "fs";
+import { join } from "path";
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+import { createMetaTxRequest } from "../wallet/helpers/CreateMetaTx";
 
 const ENCRYPTION_KEY: string = import.meta.env.ENCRYPTION_KEY;
+if(!ENCRYPTION_KEY){
+  throw new Error("missing encryption key");
+}
 
 // Function to hash milestone data for blockchain verification
 function hashMilestone(data: any) {
   return crypto.createHash("sha256").update(JSON.stringify(data)).digest("hex");
 }
+
+
 
 function decryptPrivateKey(encryptedData: string): string {
   const [iv, encrypted] = encryptedData.split(":");
@@ -30,9 +40,94 @@ function decryptPrivateKey(encryptedData: string): string {
   return decrypted;
 }
 
+function createErrorResponse(
+  code: string, 
+  message: string, 
+  status: number
+) {
+  console.error(`${code}: ${message}`);
+  return new Response(
+      JSON.stringify({ 
+          success: false, 
+          error: { code, message } 
+      }),
+      { 
+          status, 
+          headers: { "Content-Type": "application/json" } 
+      }
+  );
+}
+
 export const POST: APIRoute = async ({ request, cookies }) => {
   try {
-    const data = await request.json();
+    const data = await request.json()
+    const { description, milestone_date, image, taggedFriendIds } = data.payload;
+    const fee = data.fee
+    if (!description || !milestone_date) {
+      return new Response(
+        JSON.stringify({ error: "Missing required fields." }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const tracker_adr = import.meta.env.MILESTONE_TRACKER_ADDRESS;
+    const token_adr = import.meta.env.MST_TOKEN_ADDRESS;
+    const relayer_adr = import.meta.env.MILESTONE_RELAYER_ADDRESS
+    const forwarder_adr = import.meta.env.FORWARDER_ADDRESS
+        
+    if (!tracker_adr || !relayer_adr || !forwarder_adr || !token_adr) {
+        return createErrorResponse(
+            "CONFIG_ERROR", 
+            "Missing tracker, token, forwarder or relayer address, SERVER ERROR", 
+            500
+        );
+
+    }
+
+    const ADMIN_PRIV = import.meta.env.ADMIN_PRIV_KEY
+    if(!ADMIN_PRIV){
+        return createErrorResponse("SERVER_ERROR", "Admin unavailiable to sign transaction, try again later", 500)
+    }
+
+    const trackerABI = import.meta.env.MILESTONE_TRACKER_ABI;
+    const relayerABI = import.meta.env.MILESTONE_RELAYER_ABI
+    const tokenABI = import.meta.env.MST_TOKEN_ABI
+    const forwarderABI = import.meta.env.FORWARDER_ABI
+    let tracker_abi, relayer_abi, forwarder_abi, token_abi;
+    
+    if (!trackerABI || !relayerABI || !forwarderABI || !tokenABI) {
+        return createErrorResponse(
+            "CONFIG_ERROR", 
+            "Missing tracker, token, forwader or relayer ABI, SERVER ERROR", 
+            500
+        );
+    }
+    
+    try {
+        const __filename = fileURLToPath(import.meta.url);
+        const __dirname = dirname(__filename);
+        const projectRoot = join(__dirname, '../../../../blockchain');
+        const trackerArtifact = JSON.parse(readFileSync(join(projectRoot, trackerABI), 'utf8'));
+        const relayerArtifact = JSON.parse(readFileSync(join(projectRoot, relayerABI), 'utf8'));
+        const forwarderArtifact = JSON.parse(readFileSync(join(projectRoot, forwarderABI), 'utf8'));
+        const tokenArtifact = JSON.parse(readFileSync(join(projectRoot, tokenABI), 'utf8'));
+        tracker_abi = trackerArtifact.abi;
+        relayer_abi = relayerArtifact.abi
+        forwarder_abi = forwarderArtifact.abi
+        token_abi = tokenArtifact.abi
+        
+    } catch (error) {
+        console.error("ABI loading error:", error);
+        return createErrorResponse(
+            "BLOCKCHAIN_ERROR", 
+            "Failed to load tracker, token, relayer or forwader ABI", 
+            500
+        );
+    }
+    const provider = new ethers.JsonRpcProvider(
+      import.meta.env.ETHEREUM_RPC_URL || "http://localhost:8545"
+    );
+
     const auth = getAuth(app);
     const db = getFirestore(app);
 
@@ -55,13 +150,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     }
 
     const uid = decodedCookie.uid;
-    const { description, milestone_date, image, taggedFriendIds } = data;
-    if (!description || !milestone_date) {
-      return new Response(
-        JSON.stringify({ error: "Missing required fields." }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
-    }
+    
 
     const milestoneId = uuidv4();
     const milestoneDataForHash = {
@@ -76,11 +165,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       createdAt: new Date().toISOString(),
       hash: "",
     };
-
-    // Connect to Ethereum network
-    const provider = new ethers.JsonRpcProvider(
-      import.meta.env.ETHEREUM_RPC_URL || "http://localhost:8545"
-    );
+    
 
     // Get encrypted private key from Firebase
     let encryptedPrivKey;
@@ -101,23 +186,10 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       );
     }
 
-    // Temporary funding wallet (remove in production)
-    const testWallet = new ethers.Wallet(import.meta.env.ETHEREUM_PRIVATE_KEY, provider);
-    const wallet = new ethers.Wallet(decryptPrivateKey(encryptedPrivKey), provider);
-
-    // Fund wallet if needed
-    const sendMoneyTx = await testWallet.sendTransaction({
-      to: wallet.address,
-      value: ethers.parseEther("1.0"),
-    });
-    console.log("Sending funds...");
-    await sendMoneyTx.wait();
-    console.log("Funds sent.");
-
-    const contractAddress = import.meta.env.MILESTONE_TRACKER_ADDRESS;
-
     // Populate participants with public keys for group milestones
+    let isGroupMs
     if (taggedFriendIds && taggedFriendIds.length > 0) {
+      isGroupMs = true
       for (const friendId of taggedFriendIds) {
         const walletRef = db.collection("users").doc(friendId).collection("wallet").doc("wallet_info");
         const friendWalletDoc = await walletRef.get();
@@ -145,33 +217,92 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     const milestoneHash = hashMilestone(milestoneDataForHash);
     milestoneDataForHash.hash = milestoneHash;
 
-    // Create contract instance
-    const milestoneContract = new ethers.Contract(
-      contractAddress,
-      milestoneTrackerABI.abi,
-      wallet
-    );
+    const adminWallet = new ethers.Wallet(ADMIN_PRIV, provider) 
+    const userWallet = new ethers.Wallet(decryptPrivateKey(encryptedPrivKey), provider)
 
-    let tx;
+    //check if user has balance for this transaction
+    const token_contract = new ethers.Contract(
+      token_adr,
+      token_abi,
+      userWallet
+    )
+
+    const relayerContract = new ethers.Contract(
+      relayer_adr,
+      relayer_abi,
+      adminWallet
+    )
+
+
+    const bal = await token_contract.balanceOf(await userWallet.getAddress())
+    const [
+      addMilestoneFee, 
+      addGroupMilestoneFee, 
+      signMilestoneFee, 
+      tier1DiscountPercent, 
+      tier2DiscountPercent
+    ] = await relayerContract.getMilestoneFees();
+
+    
+    if(isGroupMs){
+      if( addGroupMilestoneFee > bal){
+        return createErrorResponse("INSUFFICIENT_FUNDS", "Insufficient funds", 400);
+      }
+
+      await token_contract.approve(
+        relayer_adr,
+        addGroupMilestoneFee
+      )
+    }
+
+    else{
+      //approve the relayer to take the fee from the user
+      if(addMilestoneFee > bal){
+
+        return createErrorResponse("INSUFFICIENT_FUNDS", "Insufficient Funds", 400);
+      }
+      await token_contract.approve(
+        relayer_adr,
+        addMilestoneFee
+      )
+    }
+
+    
+    let query, tx;
+
     let isGroup = false;
     if (!taggedFriendIds || taggedFriendIds.length === 0) {
-      tx = await milestoneContract.addMilestone(
-        milestoneDataForHash.description,
-        milestoneHash,
-        milestoneId
-      );
+
+      query = await createMetaTxRequest(
+        userWallet,
+        forwarder_adr,
+        forwarder_abi,
+        tracker_adr,
+        tracker_abi,
+        "addMilestone",
+        [milestoneDataForHash.description, milestoneHash, milestoneId]
+      )
+
+      tx = await relayerContract.relayAddMilestone(query)
+
     } else {
       isGroup = true;
-      tx = await milestoneContract.addGroupMilestone(
-        milestoneDataForHash.description,
-        milestoneDataForHash.participants,
-        milestoneHash,
-        milestoneId
-      );
+      query = await createMetaTxRequest(
+        userWallet,
+        forwarder_adr,
+        forwarder_abi,
+        tracker_adr,
+        tracker_abi,
+        "addGroupMilestone",
+        [milestoneDataForHash.description, milestoneDataForHash.participants, milestoneHash, milestoneId]
+      )
+
+      tx = await relayerContract.relayAddGroupMilestone(query)
+
     }
 
     console.log("Waiting for transaction to be mined...");
-    const receipt = await tx.wait();
+    const receipt = await tx.wait()
     console.log("Transaction confirmed:", receipt);
 
     if (receipt.status !== 1) {
@@ -184,95 +315,59 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       );
     }
 
-    let events;
-    if (!isGroup) {
-      events = await milestoneContract.queryFilter(
-        milestoneContract.filters.MilestoneAdded(wallet.address),
-        "latest"
-      );
-    } else {
-      events = await milestoneContract.queryFilter(
-        milestoneContract.filters.GroupMilestoneAdded(wallet.address),
-        "latest"
-      );
-    }
 
-    // Find event matching the transaction hash
-    const matchingEvents = events.filter(e => e.transactionHash === receipt.hash);
-    if (matchingEvents.length === 0) {
-      console.error("No Milestone added event was received");
-      return new Response(
-        JSON.stringify({
-          message: "No Milestone added event was received",
-          errorCode: "NO_EVENT_RECEIVED",
-        }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    // Use the first event
-    const event = matchingEvents[0];
+    //if here then transaction was succesful
     let milestoneData = { ...milestoneDataForHash};
 
-    const parsedLog = milestoneContract.interface.parseLog(event);
-    if (parsedLog && parsedLog.args) {
-      if (!isGroup) {
-        const { user, id, description, timeStamp } = parsedLog.args;
-        console.log(`Milestone added by ${user}:`, { id, description, timeStamp });
-      } else {
-        const { user, id, description, timeStamp, particpantCount } = parsedLog.args;
-        console.log(`Group milestone added by ${user}:`, { id, description, timeStamp, particpantCount });
-        // Add to each participant's pending milestones
-        const milestoneForParticipant = {
-            ...milestoneData,
-            signatureCount: 0,
-          };
+    const milestoneRef = db.collection("milestones").doc(milestoneId);
+    const ownerRef = db.collection("users").doc(uid).collection("milestones");
 
-        for (const friendId of taggedFriendIds) {
-          const friendMilestoneRef = db.collection("users").doc(friendId).collection("milestones").doc("milestoneData");
-          const friendMilestonesDoc = await friendMilestoneRef.get();
-          if (!friendMilestonesDoc.exists) {
-            await friendMilestoneRef.set({
-              acceptedMilestones: [],
-              pendingMilestones: [milestoneForParticipant],
-            });
-          } else {
-            await friendMilestoneRef.update({
-              pendingMilestones: FieldValue.arrayUnion(milestoneForParticipant),
-            });
-          }
+    if(isGroup){
+      const milestoneForParticipant = {
+        ...milestoneData,
+        signatureCount: 0,
+      };
+      
+      await milestoneRef.set(milestoneForParticipant);
+      const pendingRef = ownerRef.doc("pending");
+    
+      if (!(await pendingRef.get()).exists) {
+        await pendingRef.set({ milestoneRefs: [milestoneRef] });
+      }else{
+        await pendingRef.update({
+          milestoneRefs: FieldValue.arrayUnion(milestoneRef)
+        })
+      }
+      
+
+      for (const friendId of taggedFriendIds) {
+        const friendPendingRef = db
+          .collection("users")
+          .doc(friendId)
+          .collection("milestones")
+          .doc("pending");
+        
+        if (!(await friendPendingRef.get()).exists) {
+          await friendPendingRef.set({ milestoneRefs: [milestoneRef] });
+        } else {
+          await friendPendingRef.update({
+            milestoneRefs: FieldValue.arrayUnion(milestoneRef)
+          });
         }
       }
-    } else {
-      console.error("Parsed event log missing arguments.");
-    }
+    }else{
+      milestoneRef.set(milestoneData)
+      const acceptedRef = ownerRef.doc("accepted")
 
-    // Update owner’s milestone document
-    const milestonesDocRef = db.collection("users").doc(uid).collection("milestones").doc("milestoneData");
-    const milestonesDoc = await milestonesDocRef.get();
-
-    if (!milestonesDoc.exists) {
-      if (!taggedFriendIds || taggedFriendIds.length === 0) {
-        await milestonesDocRef.set({
-          acceptedMilestones: [milestoneData],
-          pendingMilestones: [],
-        });
-      } else {
-        await milestonesDocRef.set({
-          acceptedMilestones: [],
-          pendingMilestones: [milestoneData],
+      if (!(await acceptedRef.get()).exists) {
+        await acceptedRef.set({ milestoneRefs: [milestoneRef] });
+      }else{
+        await acceptedRef.update({
+          milestoneRefs: FieldValue.arrayUnion(milestoneRef)
         });
       }
-    } else {
-      if (!taggedFriendIds || taggedFriendIds.length === 0) {
-        await milestonesDocRef.update({
-          acceptedMilestones: FieldValue.arrayUnion(milestoneData),
-        });
-      } else {
-        await milestonesDocRef.update({
-          pendingMilestones: FieldValue.arrayUnion(milestoneData),
-        });
-      }
+
+
     }
 
     return new Response(

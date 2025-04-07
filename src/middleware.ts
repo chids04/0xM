@@ -8,7 +8,8 @@ export const onRequest = defineMiddleware(async (context, next) => {
     // only check session cookie on routes that need authorization
     // will conditionally add when other transactions
     try{
-    const publicRoutes = ['/dashboard', '/profile', '/personal-milestones','/shared-milestones', '/create-milestone', '/wallet'];
+    const publicRoutes = ['/dashboard', '/profile', '/personal-milestones',
+      '/shared-milestones', '/create-milestone', '/wallet', "/create"];
     if (!publicRoutes.includes(url.pathname)) {
       return next();
     }

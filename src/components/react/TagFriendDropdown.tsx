@@ -13,26 +13,31 @@ export interface Friend {
 
 interface TagFriendDropdownProps {
   friends: Friend[];
+  taggedFriends?: Friend[]; 
   onSelect: (friend: Friend) => void;
 }
 
-export function TagFriendDropdown({ friends, onSelect }: TagFriendDropdownProps) {
+export function TagFriendDropdown({ friends, taggedFriends = [], onSelect }: TagFriendDropdownProps) {
   const [search, setSearch] = useState("");
   const [isOpen, setIsOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const filteredFriends = useMemo(() => {
-    if (!search) return friends;
+    // Exclude already-tagged friends
+    const availableFriends = friends.filter(
+      (friend) => !taggedFriends.some((tagged) => tagged.uid === friend.uid)
+    );
+
+    if (!search) return availableFriends;
     const lowerSearch = search.toLowerCase();
-    return friends.filter(
+    return availableFriends.filter(
       (friend) =>
         friend.displayName.toLowerCase().includes(lowerSearch) ||
         friend.email.toLowerCase().includes(lowerSearch)
     );
-  }, [search, friends]);
+  }, [search, friends, taggedFriends]);
 
   return (
-    // Make the container focusable so it can handle onBlur.
     <div
       className="relative"
       tabIndex={0}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
-import { doc, getDoc, getFirestore } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, getFirestore } from 'firebase/firestore';
 import { app } from '../../firebase/client';
 
 interface MilestoneTimelineProps {
@@ -30,37 +30,81 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
 
     const fetchMilestones = async () => {
       try {
-        const milestonesRef = doc(db, "users", userId, "milestones", "milestoneData");
-        const snapshot = await getDoc(milestonesRef);
-        if (snapshot.exists()) {
-          const data = snapshot.data();
-          const milestoneArr = data.acceptedMilestones || [];
-          // Map only the fields we need: description, milestone_date, createdAt
-          const milestonesData = milestoneArr
-            .filter((item: any) => {
-              const participants = item.participants || [];
-              return participants.length === 0;
-            })
-            .map((item: any, index: number) => ({
-              description: item.description,
-              milestone_date: item.milestone_date,
-              createdAt: item.createdAt,
-              id: item.id || index,
-              index,
-            }));
-          // Sort by milestone_date
-          milestonesData.sort(
-            (a: any, b: any) => new Date(a.milestone_date).getTime() - new Date(b.milestone_date).getTime()
-          );
-          setMilestones(milestonesData);
-          setFilteredMilestones(milestonesData);
-        } else {
-          console.error("Milestones document does not exist.");
+        // Fetch the accepted milestones references
+        const acceptedRef = doc(db, "users", userId, "milestones", "accepted");
+        const acceptedSnapshot = await getDoc(acceptedRef);
+
+        if (!acceptedSnapshot.exists()) {
+          console.error("Accepted milestones document does not exist.");
           setMilestones([]);
           setFilteredMilestones([]);
+          return;
         }
+
+        const acceptedData = acceptedSnapshot.data();
+        const milestoneRefs = acceptedData?.milestoneRefs || [];
+        
+        // Resolve each milestone reference
+        const milestonesDataPromises = milestoneRefs.map(async (ref: any) => {
+          try {
+            // Handle string path references (like "milestones/abc123")
+            if (typeof ref === 'string') {
+              const pathParts = ref.split('/');
+              if (pathParts.length >= 2) {
+                const collectionName = pathParts[0];
+                const docId = pathParts[1]; 
+                
+                const milestoneRef = doc(db, collectionName, docId);
+                const milestoneSnapshot = await getDoc(milestoneRef);
+                
+                if (milestoneSnapshot.exists()) {
+                  const data = milestoneSnapshot.data();
+                  return data ? { id: milestoneSnapshot.id, ...data } : null;
+                }
+              }
+              return null;
+            } 
+            // Handle DocumentReference objects
+            else if (ref?.path) {
+              const milestoneSnapshot = await getDoc(ref);
+              if (milestoneSnapshot.exists()) {
+                const data = milestoneSnapshot.data();
+                return data ? { id: milestoneSnapshot.id, ...data } : null;
+              }
+            }
+            // Log unexpected reference format
+            else {
+              console.error("Invalid milestone reference format:", ref);
+            }
+            return null;
+          } catch (error) {
+            console.error("Error fetching individual milestone:", error, ref);
+            return null;
+          }
+        });
+
+        const milestonesData = (await Promise.all(milestonesDataPromises))
+          .filter((milestone) => milestone !== null) // Remove any null entries
+          .filter((milestone: any) => (milestone.participants || []).length === 0) // Only personal milestones
+          .map((milestone: any, index: number) => ({
+            description: milestone.description,
+            milestone_date: milestone.milestone_date,
+            createdAt: milestone.createdAt,
+            id: milestone.id,
+            index,
+          }));
+
+        // Sort by milestone_date
+        milestonesData.sort(
+          (a: any, b: any) => new Date(a.milestone_date).getTime() - new Date(b.milestone_date).getTime()
+        );
+
+        setMilestones(milestonesData);
+        setFilteredMilestones(milestonesData);
       } catch (error) {
         console.error("Error fetching milestones:", error);
+        setMilestones([]);
+        setFilteredMilestones([]);
       }
     };
 
@@ -78,12 +122,12 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
       const totalMilestones = milestoneElements.length;
       const containerWidth = container.clientWidth;
       const containerHeight = container.clientHeight;
-  
+
       // If container isn’t ready, retry after a short delay
       if (containerWidth === 0 || containerHeight === 0) {
-        return; 
+        return;
       }
-  
+
       if (window.innerWidth < 768) {
         milestoneElements.forEach((milestone, i) => {
           const cardHeight = 180;
@@ -98,7 +142,7 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
         const cardHeight = 180;
         const totalSpacing = containerHeight - (cardHeight * totalMilestones);
         const spaceBetweenCards = totalSpacing / (totalMilestones + 5);
-  
+
         milestoneElements.forEach((milestone) => {
           const index = parseInt(milestone.getAttribute('data-index') || '0');
           const verticalPos = spaceBetweenCards * (index + 1) + cardHeight * index + cardHeight / 2;
@@ -110,7 +154,7 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
         });
       }
     };
-  
+
     // Debounced version for resize events
     const debounce = (func: Function, wait: number) => {
       let timeout: NodeJS.Timeout;
@@ -119,9 +163,9 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
         timeout = setTimeout(() => func(...args), wait);
       };
     };
-  
+
     const debouncedUpdatePositions = debounce(updatePositions, 50);
-  
+
     // Initial positioning with retry mechanism
     const initializePositions = () => {
       if (!containerRef.current || containerRef.current.clientWidth === 0) {
@@ -130,38 +174,38 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
         updatePositions();
       }
     };
-  
+
     initializePositions(); // Run on mount
     window.addEventListener('resize', debouncedUpdatePositions);
     window.addEventListener('pageshow', updatePositions);
-  
+
     return () => {
       window.removeEventListener('resize', debouncedUpdatePositions);
       window.removeEventListener('pageshow', updatePositions);
     };
   }, [filteredMilestones]);
 
-  // Filter milestones by description (if search is desired) and date range
+  // Filter milestones by description and date range
   useEffect(() => {
     let filtered = [...milestones];
     if (searchTerm) {
-      filtered = filtered.filter(milestone =>
+      filtered = filtered.filter((milestone) =>
         milestone.description.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
     if (dateRange.start) {
       const startDate = new Date(dateRange.start);
-      filtered = filtered.filter(milestone => new Date(milestone.milestone_date) >= startDate);
+      filtered = filtered.filter((milestone) => new Date(milestone.milestone_date) >= startDate);
     }
     if (dateRange.end) {
       const endDate = new Date(dateRange.end);
-      filtered = filtered.filter(milestone => new Date(milestone.milestone_date) <= endDate);
+      filtered = filtered.filter((milestone) => new Date(milestone.milestone_date) <= endDate);
     }
     setFilteredMilestones(filtered);
   }, [milestones, searchTerm, dateRange]);
 
   const containerHeight = isMobile
-    ? filteredMilestones.length * 220  
+    ? filteredMilestones.length * 220
     : filteredMilestones.length * 200 + 200;
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -170,13 +214,13 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
 
   const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    setDateRange(prev => ({ ...prev, [name]: value }));
+    setDateRange((prev) => ({ ...prev, [name]: value }));
   };
 
   return (
     <div className="container mx-auto px-4 py-8">
       <h1 className="text-3xl font-bold text-white mb-6">Your Milestones</h1>
-      
+
       {/* Filter Controls */}
       <div className="mb-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <div>
@@ -219,8 +263,11 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
           />
         </div>
         <div className="flex items-end">
-          <button 
-            onClick={() => { setSearchTerm(''); setDateRange({ start: '', end: '' }); }}
+          <button
+            onClick={() => {
+              setSearchTerm('');
+              setDateRange({ start: '', end: '' });
+            }}
             className="w-full bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors"
           >
             Clear Filters
@@ -235,21 +282,25 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
       )}
 
       {/* Timeline Container */}
-      <div 
-        className="relative w-full my-10" 
+      <div
+        className="relative w-full my-10"
         style={{ height: `${containerHeight}px` }}
         ref={containerRef}
       >
         <div className="hidden lg:block absolute top-0 left-1/2 h-full w-0.5 bg-purple-500/30 transform -translate-x-1/2"></div>
-        
+
         <div className="milestone-container">
           {filteredMilestones.map((milestone, index) => (
-            <div 
-              key={milestone.id} 
-              className="milestone-card" 
+            <div
+              key={milestone.id}
+              className="milestone-card"
               data-index={index}
             >
-              <div className={`bg-[#1a1a1a] p-6 rounded-xl shadow-lg border border-purple-500/20 transition-all duration-300 ${isMobile ? 'w-full max-w-sm' : 'w-[280px]'}`}>
+              <div
+                className={`bg-[#1a1a1a] p-6 rounded-xl shadow-lg border border-purple-500/20 transition-all duration-300 ${
+                  isMobile ? 'w-full max-w-sm' : 'w-[280px]'
+                }`}
+              >
                 <p className="text-white text-lg font-medium mb-2">
                   {milestone.description}
                 </p>

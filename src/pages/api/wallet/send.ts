@@ -209,11 +209,6 @@ export const POST: APIRoute = async ({ request }) => {
                 userWallet
             );
 
-            const token_contract_admin = new ethers.Contract(
-                token_adr,
-                token_abi,
-                adminWallet
-            );
 
             const relayerContract = new ethers.Contract(
                 relayer_adr,

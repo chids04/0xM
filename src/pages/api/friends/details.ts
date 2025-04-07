@@ -75,3 +75,59 @@ export const GET: APIRoute = async ({ request, url }) => {
     );
   }
 };
+
+export const POST: APIRoute = async ({ request }) => {
+  try {
+    const requestData = await request.json();
+    const friendIds = requestData.friendIds || [];
+    
+    if (!Array.isArray(friendIds) || friendIds.length === 0) {
+      return new Response(
+        JSON.stringify({ message: "Missing or invalid friendIds array" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    
+    // Create a map to store email results
+    const emailMap: Record<string, string> = {};
+    
+    // Fetch emails for each friend in parallel
+    const fetchPromises = friendIds.map(async (friendId) => {
+      try {
+        // Try to get user email from Firebase Auth first
+        try {
+          const userRecord = await auth.getUser(friendId);
+          emailMap[friendId] = userRecord.email || `User-${friendId.substring(0, 4)}`;
+        } catch (authError) {
+          // Fallback to Firestore if Auth fails
+          const userDoc = await db.collection("users").doc(friendId).get();
+          if (userDoc.exists) {
+            const userData = userDoc.data();
+            emailMap[friendId] = userData.email || `User-${friendId.substring(0, 4)}`;
+          } else {
+            emailMap[friendId] = `User-${friendId.substring(0, 4)}`;
+          }
+        }
+      } catch (error) {
+        console.error(`Error fetching email for user ${friendId}:`, error);
+        emailMap[friendId] = `User-${friendId.substring(0, 4)}`;
+      }
+    });
+    
+    await Promise.all(fetchPromises);
+    
+    return new Response(
+      JSON.stringify(emailMap),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  } catch (error) {
+    console.error("Error processing bulk user emails request:", error);
+    return new Response(
+      JSON.stringify({ message: "Internal server error" }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    );
+  }
+};
