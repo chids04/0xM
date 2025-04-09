@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { MilestoneForm } from "@/components/react/MilestoneForm";
-import { TagFriendDropdown } from "@/components/react/TagFriendDropdown"; // Import TagFriendDropdown directly
+import { TagFriendDropdown } from "@/components/react/TagFriendDropdown";
 
 interface Friend {
   uid: string;
@@ -17,6 +17,8 @@ interface FeeData {
   tier2DiscountPercent?: number;
 }
 
+const MAX_FRIENDS = 4; // Maximum number of friends that can be tagged
+
 export function CreateMilestone({ friends }: { friends: Friend[] }) {
   const [taggedFriends, setTaggedFriends] = useState<Friend[]>([]);
   const [submitForm, setSubmitForm] = useState<(() => Promise<any>) | null>(null);
@@ -24,6 +26,11 @@ export function CreateMilestone({ friends }: { friends: Friend[] }) {
   const [feeData, setFeeData] = useState<FeeData | null>(null);
   const [feeLoading, setFeeLoading] = useState(true);
   const [feeError, setFeeError] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
+
+  // Ref to store the timeout ID
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Fetch milestone fees when component mounts
   useEffect(() => {
@@ -62,9 +69,19 @@ export function CreateMilestone({ friends }: { friends: Friend[] }) {
     fetchFees();
   }, []);
 
+  // Cleanup timeout on component unmount
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
+
   const handleTagSelect = (friend: Friend) => {
     setTaggedFriends((prev) => {
-      if (!prev.some((f) => f.uid === friend.uid)) {
+      // Only add if we haven't reached the limit and friend isn't already tagged
+      if (prev.length < MAX_FRIENDS && !prev.some((f) => f.uid === friend.uid)) {
         return [...prev, friend];
       }
       return prev;
@@ -75,28 +92,34 @@ export function CreateMilestone({ friends }: { friends: Friend[] }) {
     setTaggedFriends((prev) => prev.filter((f) => f.uid !== friend.uid));
   };
 
-  // Use useCallback to memoize the setSubmitForm handler
   const setFormSubmitFunction = useCallback((fn: any) => {
     setSubmitForm(() => fn);
   }, []);
 
   const createMilestone = async () => {
-    // Prevent double-clicks
     if (isSubmitting) return;
 
     if (!submitForm) {
-      alert("Form is not ready yet.");
+      setStatusMessage("Form is not ready yet.");
+      setStatusType("error");
       return;
     }
 
+    // Clear any existing timeout
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+
     setIsSubmitting(true);
+    setStatusMessage(null);
+    setStatusType(null);
 
     try {
-      // Get the form data
       const formData = await submitForm();
 
       if (!formData) {
-        alert("Please fill out the milestone details correctly.");
+        setStatusMessage("Please fill out the milestone details correctly.");
+        setStatusType("error");
         setIsSubmitting(false);
         return;
       }
@@ -113,29 +136,41 @@ export function CreateMilestone({ friends }: { friends: Friend[] }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           payload: payload,
-          fee: getApplicableFee()
+          fee: getApplicableFee(),
         }),
       });
 
       if (res.ok) {
-        alert("Milestone created successfully!");
-        // You might want to redirect or clear the form here
+        setStatusMessage("Milestone created successfully!");
+        setStatusType("success");
       } else {
         const errorData = await res.json().catch(() => null);
-        alert(`Error creating milestone: ${errorData?.message || res.statusText}`);
+        setStatusMessage(`Error creating milestone: ${errorData?.message || res.statusText}`);
+        setStatusType("error");
       }
+
+      // Set a single timeout to clear the status
+      timeoutRef.current = setTimeout(() => {
+        setStatusMessage(null);
+        setStatusType(null);
+      }, 5000);
     } catch (error) {
       console.error("Error in form submission:", error);
-      alert(`An error occurred: ${error instanceof Error ? error.message : String(error)}`);
+      setStatusMessage(`An error occurred: ${error instanceof Error ? error.message : String(error)}`);
+      setStatusType("error");
+
+      // Set a single timeout to clear the status
+      timeoutRef.current = setTimeout(() => {
+        setStatusMessage(null);
+        setStatusType(null);
+      }, 5000);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Calculate the appropriate fee based on whether it's a group milestone
   const getApplicableFee = () => {
     if (!feeData) return null;
-
     return taggedFriends.length > 0 ? feeData.addGroupMilestoneFee : feeData.addMilestoneFee;
   };
 
@@ -143,7 +178,16 @@ export function CreateMilestone({ friends }: { friends: Friend[] }) {
     <div className="container mx-auto py-8">
       <h1 className="text-2xl font-bold mb-4 text-white">Create a New Milestone</h1>
 
-      {/* Fee Information Banner */}
+      {statusMessage && (
+        <div
+          className={`p-3 rounded-md mb-4 ${
+            statusType === "success" ? "bg-green-900/30 text-green-400" : "bg-red-900/30 text-red-400"
+          }`}
+        >
+          {statusMessage}
+        </div>
+      )}
+
       <div className="mb-6">
         {feeLoading ? (
           <div className="p-3 bg-gray-800 rounded-md animate-pulse">
@@ -183,8 +227,6 @@ export function CreateMilestone({ friends }: { friends: Friend[] }) {
                   </p>
                 </div>
               </div>
-
-              {/* Current transaction cost based on milestone type */}
               <div className="mt-3 pt-3 border-t border-gray-700">
                 <p className="text-white">
                   Current cost:{" "}
@@ -201,10 +243,25 @@ export function CreateMilestone({ friends }: { friends: Friend[] }) {
 
       <MilestoneForm setSubmitForm={setFormSubmitFunction} />
       <div className="mt-8">
-        <h2 className="text-xl text-white mb-2">Tag Friends</h2>
-        <TagFriendDropdown friends={friends} taggedFriends={taggedFriends} onSelect={handleTagSelect} />
+        <h2 className="text-xl text-white mb-2">
+          Tag Friends
+          <span className="text-gray-400 text-sm ml-2">
+            ({taggedFriends.length}/{MAX_FRIENDS} max)
+          </span>
+        </h2>
+        
+        {taggedFriends.length >= MAX_FRIENDS ? (
+          <div className="text-amber-400 text-sm mb-3 p-2 bg-amber-900/20 rounded-md">
+            Maximum number of friends reached (4)
+          </div>
+        ) : (
+          <TagFriendDropdown 
+            friends={friends} 
+            taggedFriends={taggedFriends} 
+            onSelect={handleTagSelect} 
+          />
+        )}
 
-        {/* Display friends that have been tagged */}
         {taggedFriends.length > 0 && (
           <div className="mt-4 p-3 bg-[#222] rounded-md">
             <h3 className="text-gray-300 text-sm mb-2">Tagged friends ({taggedFriends.length}):</h3>

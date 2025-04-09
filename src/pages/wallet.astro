@@ -5,13 +5,10 @@ import { getAuth } from "firebase-admin/auth"
 import { WalletBalance } from "@/components/react/wallet/WalletBalance"
 import { SendMST } from "@/components/react/wallet/SendMST"
 import TransactionHistory from "@/components/react/wallet/TransactionHistory"
-
+import SubscriptionManager from '@/components/react/wallet/SubscriptionManager';
 import { app } from "../firebase/server"
 
 const user = Astro.locals.user
-
-
-//could also add a check here which checks if account is managed or not
 
 interface Friend {
   uid: string;
@@ -21,7 +18,6 @@ interface Friend {
 }
 
 let friends: Friend[] = [];
-
 let friendIds: string[] = [];
 let walletAddress
 
@@ -66,32 +62,107 @@ if (friendIds.length > 0) {
     })
   )).filter((friend): friend is Friend => friend !== null);
 }
-
-
 ---
 
 <Layout title="Wallet" user={user}>
   <div class="container mx-auto py-8 px-4">
-      <h1 class="text-3xl font-bold text-white mb-8">Wallet</h1>
-      {walletAddress ? (
-          <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <!-- Balance (full width on mobile, 1/3 on large screens) -->
-              <div class="lg:col-span-1 order-1">
-                  <WalletBalance client:visible walletAddress={walletAddress} currentUser={user}/>
-              </div>
-              
-              <!-- Send (full width on mobile, 2/3 on large screens) -->
-              <div class="lg:col-span-2 order-2">
-                  <SendMST client:visible friends={friends} senderAddress={walletAddress} currentUser={user}/>
-              </div>
-              
-              <!-- Transaction History (full width on all screens) -->
-              <div class="lg:col-span-3 order-3">
-                  <TransactionHistory client:visible currentUser={user}/>
-              </div>
+    <h1 class="text-3xl font-bold text-white mb-8">Wallet</h1>
+    
+    {walletAddress ? (
+      <div>
+        <!-- Tab Navigation -->
+        <div class="border-b border-[#333333]">
+          <ul class="flex flex-wrap md:flex-nowrap justify-center items-center text-sm font-medium text-center overflow-x-auto md:overflow-x-hidden">
+            <li class="mx-2 flex-shrink-0">
+              <button 
+                class="tab-button inline-block p-4 rounded-t-lg border-b-2 border-transparent hover:text-white hover:border-purple-500 text-gray-400 active-tab whitespace-nowrap" 
+                data-tab="balance"
+              >
+                Balance
+              </button>
+            </li>
+            <li class="mx-2 flex-shrink-0">
+              <button 
+                class="tab-button inline-block p-4 rounded-t-lg border-b-2 border-transparent hover:text-white hover:border-purple-500 text-gray-400 whitespace-nowrap" 
+                data-tab="send"
+              >
+                Send
+              </button>
+            </li>
+            <li class="mx-2 flex-shrink-0">
+              <button 
+                class="tab-button inline-block p-4 rounded-t-lg border-b-2 border-transparent hover:text-white hover:border-purple-500 text-gray-400 whitespace-nowrap" 
+                data-tab="history"
+              >
+                Transaction History
+              </button>
+            </li>
+            <li class="mx-2 flex-shrink-0">
+              <button 
+                class="tab-button inline-block p-4 rounded-t-lg border-b-2 border-transparent hover:text-white hover:border-purple-500 text-gray-400 whitespace-nowrap" 
+                data-tab="subscriptions"
+              >
+                Subscriptions
+              </button>
+            </li>
+          </ul>
+        </div>
+      
+        <!-- Tab Content -->
+        <div class="p-6">
+          <div id="balance" class="tab-content">
+            <WalletBalance client:visible walletAddress={walletAddress} currentUser={user}/>
           </div>
-      ) : (
-          <p class="text-gray-400">Wallet address not found.</p>
-      )}
+          <div id="send" class="tab-content hidden">
+            <SendMST client:visible friends={friends} senderAddress={walletAddress} currentUser={user}/>
+          </div>
+          <div id="history" class="tab-content hidden">
+            <TransactionHistory client:visible currentUser={user}/>
+          </div>
+          <div id="subscriptions" class="tab-content hidden">
+            <SubscriptionManager client:visible walletAddress={walletAddress} currentUser={user}/>
+          </div>
+        </div>
+      </div>
+    ) : (
+      <p class="text-gray-400">Wallet address not found.</p>
+    )}
   </div>
+
+  <script>
+    // Simple tab switching logic
+    document.addEventListener('DOMContentLoaded', () => {
+      const buttons = document.querySelectorAll('.tab-button');
+      const contents = document.querySelectorAll('.tab-content');
+  
+      buttons.forEach(button => {
+        button.addEventListener('click', () => {
+          const tabId = button.getAttribute('data-tab');
+  
+          // Update active tab styling
+          buttons.forEach(btn => {
+            btn.classList.remove('border-purple-500', 'text-white', 'active-tab');
+            btn.classList.add('border-transparent', 'text-gray-400');
+          });
+          button.classList.remove('border-transparent', 'text-gray-400');
+          button.classList.add('border-purple-500', 'text-white', 'active-tab');
+  
+          // Show/hide content
+          contents.forEach(content => {
+            content.classList.add('hidden');
+            if (content.id === tabId) {
+              content.classList.remove('hidden');
+            }
+          });
+        });
+      });
+  
+      // Set initial active tab styling
+      const activeTab = document.querySelector('.active-tab');
+      if (activeTab) {
+        activeTab.classList.remove('border-transparent', 'text-gray-400');
+        activeTab.classList.add('border-purple-500', 'text-white');
+      }
+    });
+  </script>
 </Layout>

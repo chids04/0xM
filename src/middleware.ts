@@ -9,7 +9,8 @@ export const onRequest = defineMiddleware(async (context, next) => {
     // will conditionally add when other transactions
     try{
     const publicRoutes = ['/dashboard', '/profile', '/personal-milestones',
-      '/shared-milestones', '/create-milestone', '/wallet', "/create"];
+      '/shared-milestones', '/create-milestone', '/wallet', "/create",
+      "/topup"];
     if (!publicRoutes.includes(url.pathname)) {
       return next();
     }

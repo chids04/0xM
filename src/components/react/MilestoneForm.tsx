@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/form";
 
 const milestoneSchema = z.object({
-  description: z.string().min(10, { message: "Description must be at least 10 characters." }),
+  description: z.string().max(30, { message: "Description must be less than 30 characters." }),
   milestone_date: z.string().refine(
     (date) => {
       try {
