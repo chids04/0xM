@@ -1,6 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, connectAuthEmulator } from "firebase/auth";
 import { getFirestore, connectFirestoreEmulator } from "firebase/firestore"
+import { getStorage, connectStorageEmulator } from "firebase/storage";
 
 const firebaseConfig = {
   apiKey: "AIzaSyD5wzK5eQBS7Fphrsyo82mvfhRjsv7Q9JA",
@@ -14,9 +15,9 @@ const firebaseConfig = {
 
 export const app = initializeApp(firebaseConfig);
 const db = getFirestore(app)
+const storage = getStorage(app)
 export const auth = getAuth(app)
 connectFirestoreEmulator(db, '127.0.0.1', 8080)
 connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true })
-
-
+connectStorageEmulator(storage, '127.0.0.1', 9199)
 

@@ -10,6 +10,7 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
   const [milestones, setMilestones] = useState<any[]>([]);
   const [pendingMilestones, setPendingMilestones] = useState<any[]>([]);
   const [filteredMilestones, setFilteredMilestones] = useState<any[]>([]);
+  const [signedMilestones, setSignedMilestones] = useState<any[]>([]);
   const [participantEmails, setParticipantEmails] = useState<Record<string, string>>({});
   const [searchTerm, setSearchTerm] = useState('');
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
@@ -20,7 +21,11 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
   const [feeData, setFeeData] = useState<{ signMilestoneFee?: string } | null>(null);
   const [feeLoading, setFeeLoading] = useState(true);
   const [feeError, setFeeError] = useState<string | null>(null);
-  const [signedMilestones, setSignedMilestones] = useState<any[]>([]);
+  
+  // Verification states
+  const [verificationStatus, setVerificationStatus] = useState<Record<string, { verified: boolean, loading: boolean, error?: string }>>({});
+  const [batchVerifying, setBatchVerifying] = useState(false);
+  const [batchResults, setBatchResults] = useState<{ total: number, verified: number, failed: number } | null>(null);
 
   useEffect(() => {
     const checkScreenSize = () => {
@@ -39,7 +44,7 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
       const db = getFirestore(app);
 
       try {
-
+        // Fetch signed milestones
         const signedRef = doc(db, "users", userId, "milestones", "signed");
         const signedSnapshot = await getDoc(signedRef);
         let signedMilestonesData: any[] = [];
@@ -67,33 +72,23 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
             .map((milestone, index) => ({ ...milestone, index }))
             .sort((a, b) => new Date(a.milestone_date).getTime() - new Date(b.milestone_date).getTime());
 
-          // Check for any finalized milestones that need to be moved to accepted
+          // Check for finalized milestones to move to accepted
           const finalizedMilestones = signedMilestonesData.filter(milestone => 
             milestone.isPending === false
           );
 
-          // If we found any finalized milestones, move them
           if (finalizedMilestones.length > 0) {
             console.log(`Found ${finalizedMilestones.length} finalized milestones to move to accepted collection`);
-            
-            // Get a batch for atomic operations
             const batch = writeBatch(db);
-            
-            // Get references to both collections
             const signedRef = doc(db, "users", userId, "milestones", "signed");
             const acceptedRef = doc(db, "users", userId, "milestones", "accepted");
-            
-            // Get the current collections
             const signedDoc = await getDoc(signedRef);
             const acceptedDoc = await getDoc(acceptedRef);
-            
-            // Process the signed collection to remove finalized milestones
+
             if (signedDoc.exists()) {
               const signedData = signedDoc.data();
               const signedRefs = signedData?.milestoneRefs || [];
-              
-              // Filter out finalized milestone paths
-              const updatedSignedRefs = signedRefs.filter(ref => {
+              const updatedSignedRefs = signedRefs.filter((ref: any) => {
                 if (typeof ref === 'string') {
                   const pathParts = ref.split('/');
                   if (pathParts.length >= 2) {
@@ -103,57 +98,38 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
                 }
                 return true;
               });
-              
-              // Update signed collection with filtered references
               batch.update(signedRef, { milestoneRefs: updatedSignedRefs });
             }
-            
-            // Process the accepted collection to add finalized milestones
+
             if (acceptedDoc.exists()) {
               const acceptedData = acceptedDoc.data();
               const acceptedRefs = acceptedData?.milestoneRefs || [];
-              
-              // Create paths for each finalized milestone
               const refsToAdd = finalizedMilestones.map(milestone => 
                 doc(db, "milestones", milestone.id)
               );
-              
-              // Check if the reference already exists in the array
-              // We need to check by path since DocumentReference objects won't be equal by direct comparison
               const uniqueRefsToAdd = refsToAdd.filter(newRef => 
                 !acceptedRefs.some((existingRef: string | { path?: string }) => {
-                  // Handle string paths
                   if (typeof existingRef === 'string') {
                     return existingRef.endsWith(`/${newRef.id}`);
-                  }
-                  // Handle DocumentReference objects
-                  else if (existingRef?.path) {
+                  } else if (existingRef?.path) {
                     return existingRef.path.endsWith(`/${newRef.id}`);
                   }
                   return false;
                 })
               );
-              
               if (uniqueRefsToAdd.length > 0) {
-                batch.update(acceptedRef, { 
-                  milestoneRefs: [...acceptedRefs, ...uniqueRefsToAdd] 
-                });
+                batch.update(acceptedRef, { milestoneRefs: [...acceptedRefs, ...uniqueRefsToAdd] });
               }
             } else {
-              // Create the accepted collection if it doesn't exist
               const refsToAdd = finalizedMilestones.map(milestone => 
                 doc(db, "milestones", milestone.id)
               );
-              
               batch.set(acceptedRef, { milestoneRefs: refsToAdd });
             }
-            
-            // Commit all changes
+
             try {
               await batch.commit();
               console.log("Successfully moved finalized milestones from signed to accepted");
-              
-              // Also remove the moved milestones from our local array
               signedMilestonesData = signedMilestonesData.filter(milestone => 
                 milestone.isPending !== false && 
                 milestone.finalizedAt === undefined
@@ -165,6 +141,7 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
         }
 
         setSignedMilestones(signedMilestonesData);
+
         // Fetch accepted milestones
         const acceptedRef = doc(db, "users", userId, "milestones", "accepted");
         const acceptedSnapshot = await getDoc(acceptedRef);
@@ -236,8 +213,7 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
 
         setPendingMilestones(pendingMilestonesData);
 
-        
-
+        // Fetch participant emails
         const allUids = [
           ...new Set([
             ...pendingMilestonesData.flatMap(m => m.taggedFriendIds || []),
@@ -251,32 +227,27 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
 
         if (allUids.length > 0) {
           try {
-            const response = await fetch('/api/friends/details', { // Replace with your actual endpoint path
+            const response = await fetch('/api/friends/details', {
               method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
+              headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ friendIds: allUids }),
             });
-  
+
             if (!response.ok) {
               throw new Error('Failed to fetch user emails');
             }
-  
+
             const emailMap = await response.json();
-            setParticipantEmails(emailMap); // Update state with the fetched email map
+            setParticipantEmails(emailMap);
           } catch (emailError) {
             console.error('Error fetching emails:', emailError);
-            // Optionally set a fallback state or handle the error differently
             const fallbackEmailMap = allUids.reduce((acc, uid) => {
-              acc[uid] = `User-${uid.substring(0, 4)}`; // Fallback as per your API logic
+              acc[uid] = `User-${uid.substring(0, 4)}`;
               return acc;
             }, {} as Record<string, string>);
             setParticipantEmails(fallbackEmailMap);
           }
         }
-
-        
       } catch (error) {
         console.error("Error fetching milestones:", error);
       } finally {
@@ -470,8 +441,131 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
     }
   };
 
+  // Verify a single milestone
+  const verifyMilestone = async (milestoneId: string) => {
+    try {
+      setVerificationStatus(prev => ({
+        ...prev,
+        [milestoneId]: { ...prev[milestoneId], loading: true }
+      }));
+
+      const response = await fetch('/api/milestone/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          userId: userId,
+          milestoneId: milestoneId 
+        })
+      });
+
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.message || 'Verification failed');
+      }
+
+      setVerificationStatus(prev => ({
+        ...prev,
+        [milestoneId]: { 
+          verified: data.verified,
+          loading: false,
+          error: data.verified ? undefined : 'Hash mismatch detected'
+        }
+      }));
+
+      return data.verified;
+    } catch (error: any) {
+      console.error("Error verifying milestone:", error);
+      
+      setVerificationStatus(prev => ({
+        ...prev,
+        [milestoneId]: { 
+          verified: false, 
+          loading: false,
+          error: error.message
+        }
+      }));
+      
+      return false;
+    }
+  };
+
+  // Verify all milestones owned by the user
+  const verifyAllMilestones = async () => {
+    const ownedMilestones = filteredMilestones.filter(m => m.owner === userId);
+    if (!ownedMilestones.length) return;
+    
+    setBatchVerifying(true);
+    setBatchResults(null);
+    
+    try {
+      let verified = 0;
+      let failed = 0;
+      
+      for (const milestone of ownedMilestones) {
+        const isVerified = await verifyMilestone(milestone.id);
+        if (isVerified) {
+          verified++;
+        } else {
+          failed++;
+        }
+      }
+      
+      setBatchResults({
+        total: ownedMilestones.length,
+        verified,
+        failed
+      });
+    } catch (error) {
+      console.error("Error during batch verification:", error);
+    } finally {
+      setBatchVerifying(false);
+    }
+  };
+
+  // Get verification status badge
+  const getVerificationBadge = (milestoneId: string) => {
+    const status = verificationStatus[milestoneId];
+    
+    if (!status) {
+      return null;
+    }
+    
+    if (status.loading) {
+      return (
+        <div className="flex items-center mt-2">
+          <div className="animate-spin h-4 w-4 border-2 border-purple-500 border-t-transparent rounded-full mr-2"></div>
+          <span className="text-gray-400 text-sm">Verifying...</span>
+        </div>
+      );
+    }
+    
+    if (status.verified) {
+      return (
+        <div className="flex items-center mt-2">
+          <svg className="w-4 h-4 text-green-500 mr-1" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+          </svg>
+          <span className="text-green-500 text-sm">Verified</span>
+        </div>
+      );
+    }
+    
+    return (
+      <div className="flex items-center mt-2">
+        <svg className="w-4 h-4 text-red-500 mr-1" fill="currentColor" viewBox="0 0 20 20">
+          <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+        </svg>
+        <span className="text-red-500 text-sm">{status.error || 'Verification failed'}</span>
+      </div>
+    );
+  };
+
   const activeDisplayItems = activeTab === 'active' ? filteredMilestones : activeTab === 'pending' ? pendingMilestones : signedMilestones;
   const containerHeight = isMobile ? activeDisplayItems.length * 360 : activeDisplayItems.length * 320 + 200;
+
+  // Check if there are any owned milestones for batch verification
+  const hasOwnedMilestones = filteredMilestones.some(m => m.owner === userId);
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -509,49 +603,81 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
       </div>
 
       {activeTab === 'active' && (
-        <div className="mb-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div>
-            <label htmlFor="search" className="block text-sm font-medium text-gray-400 mb-1">Search Milestones</label>
-            <input
-              type="text"
-              id="search"
-              value={searchTerm}
-              onChange={handleSearchChange}
-              placeholder="Search description"
-              className="w-full p-2 bg-[#252525] border border-purple-500/20 rounded-lg text-white focus:outline-none focus:border-purple-500"
-            />
+        <>
+          <div className="mb-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div>
+              <label htmlFor="search" className="block text-sm font-medium text-gray-400 mb-1">Search Milestones</label>
+              <input
+                type="text"
+                id="search"
+                value={searchTerm}
+                onChange={handleSearchChange}
+                placeholder="Search description"
+                className="w-full p-2 bg-[#252525] border border-purple-500/20 rounded-lg text-white focus:outline-none focus:border-purple-500"
+              />
+            </div>
+            <div>
+              <label htmlFor="startDate" className="block text-sm font-medium text-gray-400 mb-1">Start Date</label>
+              <input
+                type="date"
+                id="startDate"
+                name="start"
+                value={dateRange.start}
+                onChange={handleDateChange}
+                className="w-full p-2 bg-[#252525] border border-purple-500/20 rounded-lg text-white focus:outline-none focus:border-purple-500"
+              />
+            </div>
+            <div>
+              <label htmlFor="endDate" className="block text-sm font-medium text-gray-400 mb-1">End Date</label>
+              <input
+                type="date"
+                id="endDate"
+                name="end"
+                value={dateRange.end}
+                onChange={handleDateChange}
+                className="w-full p-2 bg-[#252525] border border-purple-500/20 rounded-lg text-white focus:outline-none focus:border-purple-500"
+              />
+            </div>
+            <div className="flex items-end">
+              <button
+                onClick={() => { setSearchTerm(''); setDateRange({ start: '', end: '' }); }}
+                className="w-full bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors"
+              >
+                Clear Filters
+              </button>
+            </div>
           </div>
-          <div>
-            <label htmlFor="startDate" className="block text-sm font-medium text-gray-400 mb-1">Start Date</label>
-            <input
-              type="date"
-              id="startDate"
-              name="start"
-              value={dateRange.start}
-              onChange={handleDateChange}
-              className="w-full p-2 bg-[#252525] border border-purple-500/20 rounded-lg text-white focus:outline-none focus:border-purple-500"
-            />
-          </div>
-          <div>
-            <label htmlFor="endDate" className="block text-sm font-medium text-gray-400 mb-1">End Date</label>
-            <input
-              type="date"
-              id="endDate"
-              name="end"
-              value={dateRange.end}
-              onChange={handleDateChange}
-              className="w-full p-2 bg-[#252525] border border-purple-500/20 rounded-lg text-white focus:outline-none focus:border-purple-500"
-            />
-          </div>
-          <div className="flex items-end">
-            <button
-              onClick={() => { setSearchTerm(''); setDateRange({ start: '', end: '' }); }}
-              className="w-full bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors"
-            >
-              Clear Filters
-            </button>
-          </div>
-        </div>
+
+          {/* Verification Controls - Only for owners with owned milestones */}
+          {hasOwnedMilestones && (
+            <div className="mb-6 flex flex-wrap gap-4 items-center">
+              <button 
+                onClick={verifyAllMilestones}
+                disabled={batchVerifying || !hasOwnedMilestones}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+              >
+                {batchVerifying ? (
+                  <>
+                    <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></div>
+                    Verifying...
+                  </>
+                ) : (
+                  <>Verify All Your Milestones</>
+                )}
+              </button>
+              
+              {batchResults && (
+                <div className="text-sm px-4 py-2 rounded-lg bg-[#252525] border border-purple-500/20">
+                  <span className="text-gray-300">Results: </span>
+                  <span className="text-green-500">{batchResults.verified} verified</span>
+                  {batchResults.failed > 0 && (
+                    <span className="text-red-500 ml-2">{batchResults.failed} failed</span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </>
       )}
 
       {activeTab === 'pending' && (
@@ -616,6 +742,19 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
                       ))}
                     </p>
                     <p className="text-gray-400">Created: {new Date(milestone.createdAt).toLocaleString('en-US')}</p>
+                    
+                    {/* Verification Status - Shown for all, but only owner can trigger */}
+                    {getVerificationBadge(milestone.id)}
+                    
+                    {/* Verify Button - Only for owner */}
+                    {milestone.owner === userId && !verificationStatus[milestone.id]?.loading && (
+                      <button
+                        onClick={() => verifyMilestone(milestone.id)}
+                        className="mt-3 px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-sm rounded transition-colors"
+                      >
+                        Verify
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -692,6 +831,19 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
                     </p>
                     <p className="text-gray-400">Created: {new Date(milestone.createdAt).toLocaleString('en-US')}</p>
                     {milestone.finalizedAt && <p className="text-gray-400">Finalized: {new Date(milestone.finalizedAt).toLocaleString('en-US')}</p>}
+                    
+                    {/* Verification Status - Shown for all, but only owner can trigger */}
+                    {getVerificationBadge(milestone.id)}
+                    
+                    {/* Verify Button - Only for owner */}
+                    {milestone.owner === userId && !verificationStatus[milestone.id]?.loading && (
+                      <button
+                        onClick={() => verifyMilestone(milestone.id)}
+                        className="mt-3 px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-sm rounded transition-colors"
+                      >
+                        Verify
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -716,7 +868,7 @@ const styles = `
     transform: translateX(-50%);
   }
   .milestone-card > div {
-    max-height: 300px;
+    max-height: 340px;
     overflow-x: hidden;
     overflow-y: auto;
   }
@@ -733,7 +885,7 @@ const styles = `
     .milestone-card > div {
       width: 90vw;
       max-width: 32rem;
-      max-height: 340px;
+      max-height: 360px;
     }
   }
 `;

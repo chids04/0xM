@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { collection, doc, getDoc, getDocs, getFirestore } from 'firebase/firestore';
 import { app } from '../../firebase/client';
+import html2canvas from 'html2canvas-pro';
 
 interface MilestoneTimelineProps {
   userId: string;
@@ -13,6 +14,24 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const containerRef = useRef<HTMLDivElement>(null);
   const [isMobile, setIsMobile] = useState(false);
+  
+  // Verification states
+  const [verificationStatus, setVerificationStatus] = useState<Record<string, { verified: boolean, loading: boolean, error?: string }>>({});
+  const [batchVerifying, setBatchVerifying] = useState(false);
+  const [batchResults, setBatchResults] = useState<{ total: number, verified: number, failed: number } | null>(null);
+
+  // Preview modal state
+  const [previewData, setPreviewData] = useState<{
+    visible: boolean;
+    milestone: any | null;
+    loading: boolean;
+    error: string | null;
+  }>({
+    visible: false,
+    milestone: null,
+    loading: false,
+    error: null
+  });
 
   // Check for mobile screen size
   useEffect(() => {
@@ -24,13 +43,12 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
     return () => window.removeEventListener('resize', checkScreenSize);
   }, []);
 
-  // Fetch milestones from Firebase using the passed userId
+  // Fetch milestones from Firebase
   useEffect(() => {
     const db = getFirestore(app);
 
     const fetchMilestones = async () => {
       try {
-        // Fetch the accepted milestones references
         const acceptedRef = doc(db, "users", userId, "milestones", "accepted");
         const acceptedSnapshot = await getDoc(acceptedRef);
 
@@ -44,36 +62,28 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
         const acceptedData = acceptedSnapshot.data();
         const milestoneRefs = acceptedData?.milestoneRefs || [];
         
-        // Resolve each milestone reference
         const milestonesDataPromises = milestoneRefs.map(async (ref: any) => {
           try {
-            // Handle string path references (like "milestones/abc123")
             if (typeof ref === 'string') {
               const pathParts = ref.split('/');
               if (pathParts.length >= 2) {
                 const collectionName = pathParts[0];
                 const docId = pathParts[1]; 
-                
                 const milestoneRef = doc(db, collectionName, docId);
                 const milestoneSnapshot = await getDoc(milestoneRef);
-                
                 if (milestoneSnapshot.exists()) {
                   const data = milestoneSnapshot.data();
                   return data ? { id: milestoneSnapshot.id, ...data } : null;
                 }
               }
               return null;
-            } 
-            // Handle DocumentReference objects
-            else if (ref?.path) {
+            } else if (ref?.path) {
               const milestoneSnapshot = await getDoc(ref);
               if (milestoneSnapshot.exists()) {
                 const data = milestoneSnapshot.data();
                 return data ? { id: milestoneSnapshot.id, ...data } : null;
               }
-            }
-            // Log unexpected reference format
-            else {
+            } else {
               console.error("Invalid milestone reference format:", ref);
             }
             return null;
@@ -84,17 +94,17 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
         });
 
         const milestonesData = (await Promise.all(milestonesDataPromises))
-          .filter((milestone) => milestone !== null) // Remove any null entries
-          .filter((milestone: any) => (milestone.participants || []).length === 0) // Only personal milestones
+          .filter((milestone) => milestone !== null)
+          .filter((milestone: any) => (milestone.participants || []).length === 0)
           .map((milestone: any, index: number) => ({
             description: milestone.description,
             milestone_date: milestone.milestone_date,
             createdAt: milestone.createdAt,
             id: milestone.id,
+            image: milestone.image, // Include image if available
             index,
           }));
 
-        // Sort by milestone_date
         milestonesData.sort(
           (a: any, b: any) => new Date(a.milestone_date).getTime() - new Date(b.milestone_date).getTime()
         );
@@ -113,7 +123,7 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
     }
   }, [userId]);
 
-  // Update card positions when window resizes or filtered milestones change
+  // Update card positions
   useLayoutEffect(() => {
     const updatePositions = () => {
       if (!containerRef.current || filteredMilestones.length === 0) return;
@@ -123,7 +133,6 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
       const containerWidth = container.clientWidth;
       const containerHeight = container.clientHeight;
 
-      // If container isn’t ready, retry after a short delay
       if (containerWidth === 0 || containerHeight === 0) {
         return;
       }
@@ -136,7 +145,6 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
           (milestone as HTMLElement).style.left = '50%';
         });
       } else {
-        // Sine wave layout for larger screens
         const maxAmplitude = containerWidth * 0.3;
         const amplitude = Math.min(maxAmplitude, Math.max(20, (window.innerWidth - 480) / 4));
         const cardHeight = 180;
@@ -155,7 +163,6 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
       }
     };
 
-    // Debounced version for resize events
     const debounce = (func: Function, wait: number) => {
       let timeout: NodeJS.Timeout;
       return (...args: any[]) => {
@@ -166,16 +173,15 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
 
     const debouncedUpdatePositions = debounce(updatePositions, 50);
 
-    // Initial positioning with retry mechanism
     const initializePositions = () => {
       if (!containerRef.current || containerRef.current.clientWidth === 0) {
-        requestAnimationFrame(initializePositions); // Retry until container is ready
+        requestAnimationFrame(initializePositions);
       } else {
         updatePositions();
       }
     };
 
-    initializePositions(); // Run on mount
+    initializePositions();
     window.addEventListener('resize', debouncedUpdatePositions);
     window.addEventListener('pageshow', updatePositions);
 
@@ -185,7 +191,7 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
     };
   }, [filteredMilestones]);
 
-  // Filter milestones by description and date range
+  // Filter milestones
   useEffect(() => {
     let filtered = [...milestones];
     if (searchTerm) {
@@ -215,6 +221,162 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
   const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setDateRange((prev) => ({ ...prev, [name]: value }));
+  };
+
+  // Verify a single milestone
+  const verifyMilestone = async (milestoneId: string) => {
+    try {
+      setVerificationStatus(prev => ({
+        ...prev,
+        [milestoneId]: { ...prev[milestoneId], loading: true }
+      }));
+
+      const response = await fetch('/api/milestone/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: userId, milestoneId: milestoneId })
+      });
+
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.message || 'Verification failed');
+      }
+
+      setVerificationStatus(prev => ({
+        ...prev,
+        [milestoneId]: { 
+          verified: data.verified,
+          loading: false,
+          error: data.verified ? undefined : 'Hash mismatch detected'
+        }
+      }));
+
+      return data.verified;
+    } catch (error: any) {
+      console.error("Error verifying milestone:", error);
+      setVerificationStatus(prev => ({
+        ...prev,
+        [milestoneId]: { 
+          verified: false, 
+          loading: false,
+          error: error.message
+        }
+      }));
+      return false;
+    }
+  };
+
+  // Verify all milestones
+  const verifyAllMilestones = async () => {
+    if (!filteredMilestones.length) return;
+    
+    setBatchVerifying(true);
+    setBatchResults(null);
+    
+    try {
+      let verified = 0;
+      let failed = 0;
+      
+      for (const milestone of filteredMilestones) {
+        const isVerified = await verifyMilestone(milestone.id);
+        if (isVerified) {
+          verified++;
+        } else {
+          failed++;
+        }
+      }
+      
+      setBatchResults({
+        total: filteredMilestones.length,
+        verified,
+        failed
+      });
+    } catch (error) {
+      console.error("Error during batch verification:", error);
+    } finally {
+      setBatchVerifying(false);
+    }
+  };
+
+  // Preview handling
+  const handleShowPreview = (milestone: any) => {
+    setPreviewData({
+      visible: true,
+      milestone,
+      loading: false,
+      error: null
+    });
+  };
+
+  const handleSaveImage = async () => {
+    if (!previewData.milestone) return;
+    
+    setPreviewData(prev => ({ ...prev, loading: true }));
+    
+    try {
+      const certificateElement = document.getElementById('certificate-container');
+      if (!certificateElement) throw new Error('Certificate element not found');
+
+      const canvas = await html2canvas(certificateElement, {
+        scale: 2,
+        logging: true,
+        useCORS: true,
+        backgroundColor: '#1a1a1a'
+      });
+
+      const image = canvas.toDataURL('image/png');
+      const link = document.createElement('a');
+      link.download = `milestone-${previewData.milestone.id}.png`;
+      link.href = image;
+      link.click();
+
+      setPreviewData(prev => ({ ...prev, loading: false, visible: false }));
+    } catch (error: any) {
+      setPreviewData(prev => ({
+        ...prev,
+        loading: false,
+        error: error.message || 'Failed to save image'
+      }));
+    }
+  };
+
+  // Get verification status badge
+  const getVerificationBadge = (milestoneId: string) => {
+    const status = verificationStatus[milestoneId];
+    
+    if (!status) {
+      return null;
+    }
+    
+    if (status.loading) {
+      return (
+        <div className="flex items-center mt-2">
+          <div className="animate-spin h-4 w-4 border-2 border-purple-500 border-t-transparent rounded-full mr-2"></div>
+          <span className="text-gray-400 text-sm">Verifying...</span>
+        </div>
+      );
+    }
+    
+    if (status.verified) {
+      return (
+        <div className="flex items-center mt-2">
+          <svg className="w-4 h-4 text-green-500 mr-1" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+          </svg>
+          <span className="text-green-500 text-sm">Verified</span>
+        </div>
+      );
+    }
+    
+    return (
+      <div className="flex items-center mt-2">
+        <svg className="w-4 h-4 text-red-500 mr-1" fill="currentColor" viewBox="0 0 20 20">
+          <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+        </svg>
+        <span className="text-red-500 text-sm">{status.error || 'Verification failed'}</span>
+      </div>
+    );
   };
 
   return (
@@ -275,6 +437,34 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
         </div>
       </div>
 
+      {/* Verification Controls */}
+      <div className="mb-6 flex flex-wrap gap-4 items-center">
+        <button 
+          onClick={verifyAllMilestones}
+          disabled={batchVerifying || filteredMilestones.length === 0}
+          className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+        >
+          {batchVerifying ? (
+            <>
+              <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></div>
+              Verifying...
+            </>
+          ) : (
+            <>Verify All Milestones</>
+          )}
+        </button>
+        
+        {batchResults && (
+          <div className="text-sm px-4 py-2 rounded-lg bg-[#252525] border border-purple-500/20">
+            <span className="text-gray-300">Results: </span>
+            <span className="text-green-500">{batchResults.verified} verified</span>
+            {batchResults.failed > 0 && (
+              <span className="text-red-500 ml-2">{batchResults.failed} failed</span>
+            )}
+          </div>
+        )}
+      </div>
+
       {filteredMilestones.length === 0 && (
         <div className="text-center py-8 text-gray-400">
           No milestones found matching your filters.
@@ -310,36 +500,150 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
                 <p className="text-gray-400">
                   Timestamp: {new Date(milestone.createdAt).toLocaleTimeString('en-US')}
                 </p>
+                
+                {getVerificationBadge(milestone.id)}
+                
+                <div className="mt-3 flex gap-2">
+                  {!verificationStatus[milestone.id]?.loading && (
+                    <button
+                      onClick={() => verifyMilestone(milestone.id)}
+                      className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-sm rounded transition-colors"
+                    >
+                      Verify
+                    </button>
+                  )}
+                  <button
+                    onClick={() => handleShowPreview(milestone)}
+                    className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-sm rounded transition-colors"
+                  >
+                    Save
+                  </button>
+                </div>
               </div>
             </div>
           ))}
         </div>
       </div>
-      <style>{styles}</style>
+
+      {/* Preview Modal */}
+      {previewData.visible && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="relative bg-[#1a1a1a] rounded-xl max-w-2xl w-full p-6 border border-purple-500/20">
+            <button
+              onClick={() => setPreviewData(prev => ({ ...prev, visible: false }))}
+              className="absolute top-4 right-4 text-gray-400 hover:text-white transition-colors"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+
+            <h3 className="text-xl font-bold text-white mb-4">Preview Certificate</h3>
+            
+            <div id="certificate-container" className="p-6 bg-[#1a1a1a] rounded-lg">
+              <div className="text-center mb-8">
+                <h2 className="text-2xl font-bold text-white mb-2">
+                  {previewData.milestone.description}
+                </h2>
+              </div>
+
+              <div className="mb-8">
+                {previewData.milestone.image && (
+                  <div className="mt-4 flex justify-center">
+                    <img
+                      src={previewData.milestone.image}
+                      alt="Milestone"
+                      className="max-w-full h-auto rounded-lg"
+                      style={{ maxHeight: '200px' }}
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none'; // Hide if image fails to load
+                      }}
+                    />
+                  </div>
+                )}
+                <div className="mt-6 bg-[#252525] p-4 rounded-lg">
+                  <p className="text-gray-400 text-sm mb-1">Created At</p>
+                  <p className="text-white">
+                    {new Date(previewData.milestone.createdAt).toLocaleString()}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex justify-between items-center pt-6 border-t border-[#333]">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-[#333] rounded-lg flex items-center justify-center">
+                    <span className="text-gray-400 text-sm">LOGO</span>
+                  </div>
+                  <div>
+                    <p className="text-white text-sm">Verified by</p>
+                    <p className="text-gray-400 text-xs">Chain of Achievements</p>
+                  </div>
+                </div>
+                {verificationStatus[previewData.milestone.id]?.verified && (
+                  <div className="flex items-center gap-2 bg-[#252525] px-4 py-2 rounded-lg">
+                    <div className="w-6 h-6 bg-green-500/20 rounded-full flex items-center justify-center">
+                      <svg className="w-4 h-4 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <span className="text-green-500 text-sm">Verified</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => setPreviewData(prev => ({ ...prev, visible: false }))}
+                className="px-4 py-2 text-gray-400 hover:text-white transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveImage}
+                disabled={previewData.loading}
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors disabled:opacity-50 flex items-center"
+              >
+                {previewData.loading ? (
+                  <>
+                    <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2" />
+                    Saving...
+                  </>
+                ) : (
+                  'Save Image'
+                )}
+              </button>
+            </div>
+
+            {previewData.error && (
+              <div className="mt-4 text-red-500 text-sm">{previewData.error}</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        .milestone-container {
+          position: relative;
+          width: 100%;
+          height: 100%;
+        }
+        
+        .milestone-card {
+          position: absolute;
+          transition: all 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+          transform: translateX(-50%);
+        }
+        
+        @media (max-width: 767px) {
+          .milestone-card > div {
+            width: 90vw;
+            max-width: 330px;
+          }
+        }
+      `}</style>
     </div>
   );
 };
-
-// CSS for the component
-const styles = `
-  .milestone-container {
-    position: relative;
-    width: 100%;
-    height: 100%;
-  }
-  
-  .milestone-card {
-    position: absolute;
-    transition: all 0.6s cubic-bezier(0.22, 1, 0.36, 1);
-    transform: translateX(-50%);
-  }
-  
-  @media (max-width: 767px) {
-    .milestone-card > div {
-      width: 90vw;
-      max-width: 330px;
-    }
-  }
-`;
 
 export default MilestoneTimeline;

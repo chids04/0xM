@@ -24,8 +24,9 @@
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "ethers": "^6.13.5",
-    "firebase": "^11.3.1",
+    "firebase": "^11.6.0",
     "firebase-admin": "^13.1.0",
+    "html2canvas-pro": "^1.5.8",
     "lucide-react": "^0.476.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -35,5 +36,8 @@
     "tailwindcss-animate": "^1.0.7",
     "uuid": "^11.1.0",
     "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/formidable": "^3.4.5"
   }
 }

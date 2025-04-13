@@ -1,6 +1,6 @@
 import type { APIRoute } from "astro";
 import { app } from "../../../firebase/server";
-import { getFirestore } from "firebase-admin/firestore";
+import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getAuth } from "firebase-admin/auth";
 
 export const POST: APIRoute = async ({ request, cookies }) => {
@@ -55,88 +55,91 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       );
     }
 
-    // Update the current user's Firestore document (remove from pending)
-    const currentUserMilestonesRef = db
-      .collection("users")
-      .doc(currentUserUid)
-      .collection("milestones")
-      .doc("milestoneData");
-    const currentUserSnapshot = await currentUserMilestonesRef.get();
+    // Get milestone data
+    const milestoneRef = db.collection("milestones").doc(milestoneId);
+    const milestoneDoc = await milestoneRef.get();
 
-    if (!currentUserSnapshot.exists) {
+    if (!milestoneDoc.exists) {
       return new Response(
         JSON.stringify({
-          message: "User's milestone data not found",
-          errorCode: "USER_MILESTONE_DATA_NOT_FOUND",
-        }),
-        { status: 404, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    const currentUserData = currentUserSnapshot.data();
-    const requestedMilestones = currentUserData.requestedMilestones || [];
-    const milestoneIndex = requestedMilestones.findIndex((m: any) => m.id === milestoneId);
-
-    if (milestoneIndex === -1) {
-      return new Response(
-        JSON.stringify({
-          message: "Milestone not found in user's pending list",
+          message: "Milestone not found",
           errorCode: "MILESTONE_NOT_FOUND",
         }),
         { status: 404, headers: { "Content-Type": "application/json" } }
       );
     }
 
-    // Remove the milestone from pendingMilestones
-    const declinedMilestone = { ...requestedMilestones[milestoneIndex], declinedBy: currentUserUid, declinedAt: new Date().toISOString() };
-    requestedMilestones.splice(milestoneIndex, 1);
+    const milestoneData = milestoneDoc.data();
+    if (!milestoneData) {
+      return new Response(
+        JSON.stringify({
+          message: "Milestone data is empty",
+          errorCode: "MILESTONE_DATA_EMPTY",
+        }),
+        { status: 500, headers: { "Content-Type": "application/json" } }
+      );
+    }
 
-    await currentUserMilestonesRef.update({
-      requestedMilestones,
+    // Get taggedFriendIds from milestone data
+    const taggedFriendIds = milestoneData.taggedFriendIds || [];
+
+    // Create array of all users to update (owner + tagged friends + current user)
+    const usersToUpdate = [...new Set([ownerUid, currentUserUid, ...taggedFriendIds])];
+
+    // Update pending and declined milestones for all relevant users
+    for (const userId of usersToUpdate) {
+      const userPendingRef = db
+        .collection("users")
+        .doc(userId)
+        .collection("milestones")
+        .doc("pending");
+      
+      const userDeclinedRef = db
+        .collection("users")
+        .doc(userId)
+        .collection("milestones")
+        .doc("declined");
+
+      // Remove from pending
+      const userPendingDoc = await userPendingRef.get();
+      if (userPendingDoc.exists) {
+        await userPendingRef.update({
+          milestoneRefs: FieldValue.arrayRemove(milestoneRef)
+        });
+      }
+
+      // Add to declined
+      const userDeclinedDoc = await userDeclinedRef.get();
+      if (!userDeclinedDoc.exists) {
+        await userDeclinedRef.set({ milestoneRefs: [milestoneRef] });
+      } else {
+        await userDeclinedRef.update({
+          milestoneRefs: FieldValue.arrayUnion(milestoneRef)
+        });
+      }
+    }
+
+    // Update the milestone document to track who declined it
+    await milestoneRef.update({
+      declinedBy: FieldValue.arrayUnion({
+        uid: currentUserUid,
+        timestamp: Timestamp.now()
+      }),
+      status: "declined" // Add a status field for easy filtering
     });
 
-    // Update the owner's Firestore document (add to declinedMilestones)
-    const ownerMilestonesRef = db
-      .collection("users")
-      .doc(ownerUid)
-      .collection("milestones")
-      .doc("milestoneData");
-    const ownerSnapshot = await ownerMilestonesRef.get();
+    // Add to global expiring milestones for automated cleanup
+    const expiryDate = new Date();
+    expiryDate.setDate(expiryDate.getDate() + 3); // 3 days from now
 
-    if (!ownerSnapshot.exists) {
-      return new Response(
-        JSON.stringify({
-          message: "Owner's milestone data not found",
-          errorCode: "OWNER_MILESTONE_DATA_NOT_FOUND",
-        }),
-        { status: 404, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    const ownerData = ownerSnapshot.data();
-    const ownerPendingMilestones = ownerData.pendingMilestones || [];
-    const ownerMilestoneIndex = ownerPendingMilestones.findIndex((m: any) => m.id === milestoneId);
-
-    if (ownerMilestoneIndex === -1) {
-      return new Response(
-        JSON.stringify({
-          message: "Milestone not found in owner's pending list",
-          errorCode: "OWNER_MILESTONE_NOT_FOUND",
-        }),
-        { status: 404, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    // Move the milestone to declinedMilestones
-    const declinedMilestoneForOwner = { ...ownerPendingMilestones[ownerMilestoneIndex], declinedBy: currentUserUid, declinedAt: new Date().toISOString() };
-    ownerPendingMilestones.splice(ownerMilestoneIndex, 1); // Remove from pending
-
-    const declinedMilestones = ownerData.declinedMilestones || [];
-    declinedMilestones.push(declinedMilestoneForOwner);
-
-    await ownerMilestonesRef.update({
-      requestedMilestones: ownerPendingMilestones,
-      declinedMilestones,
+    const expiringMilestonesRef = db.collection("expiringMilestones").doc(milestoneId);
+    await expiringMilestonesRef.set({
+      milestoneRef,
+      owner: ownerUid,
+      declinedBy: currentUserUid,
+      declinedAt: Timestamp.now(),
+      expiryDate: Timestamp.fromDate(expiryDate),
+      processed: false
     });
 
     return new Response(
@@ -146,10 +149,10 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
-  } catch (error) {
+  } catch (error: unknown) {
     console.error("Error in milestone decline API:", error);
     return new Response(
-      JSON.stringify({ error: "Internal Server Error", message: error.message }),
+      JSON.stringify({ error: "Internal Server Error", message: error instanceof Error ? error.message : "Unknown error" }),
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }

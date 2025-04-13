@@ -104,7 +104,7 @@ export function SendMST({ friends, senderAddress, currentUser}: SendMSTProps) {
       const data = await response.json();
       
       if (!response.ok) {
-        throw new Error(data.message || 'Failed to send tokens');
+        throw new Error(data.error.message || 'Failed to send tokens');
       }
       
       setSuccess(`Successfully sent ${amount} MST to ${selectedFriend ? selectedFriend.displayName : recipientAddress}`);

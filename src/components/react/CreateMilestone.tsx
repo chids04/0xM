@@ -17,7 +17,7 @@ interface FeeData {
   tier2DiscountPercent?: number;
 }
 
-const MAX_FRIENDS = 4; // Maximum number of friends that can be tagged
+const MAX_FRIENDS = 4;
 
 export function CreateMilestone({ friends }: { friends: Friend[] }) {
   const [taggedFriends, setTaggedFriends] = useState<Friend[]>([]);
@@ -28,31 +28,26 @@ export function CreateMilestone({ friends }: { friends: Friend[] }) {
   const [feeError, setFeeError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
 
-  // Ref to store the timeout ID
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Fetch milestone fees when component mounts
   useEffect(() => {
     const fetchFees = async () => {
       try {
         setFeeLoading(true);
         setFeeError(null);
-
         const response = await fetch("/api/milestone/fees", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ feeType: "milestone" }),
         });
-
         if (!response.ok) {
           const errorData = await response.json();
           throw new Error(errorData?.error?.message || "Failed to fetch fees");
         }
-
         const data = await response.json();
-        console.log("Fee data received:", data);
-
         if (data.success && data.fees) {
           setFeeData(data.fees);
         } else {
@@ -60,27 +55,27 @@ export function CreateMilestone({ friends }: { friends: Friend[] }) {
         }
       } catch (error) {
         console.error("Error fetching fees:", error);
-        setFeeError(error.message || "Failed to fetch fees");
+        setFeeError((error as Error).message || "Failed to fetch fees");
       } finally {
         setFeeLoading(false);
       }
     };
-
     fetchFees();
   }, []);
 
-  // Cleanup timeout on component unmount
   useEffect(() => {
     return () => {
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
       }
+      if (imagePreview) {
+        URL.revokeObjectURL(imagePreview); // Clean up preview URL
+      }
     };
-  }, []);
+  }, [imagePreview]);
 
   const handleTagSelect = (friend: Friend) => {
     setTaggedFriends((prev) => {
-      // Only add if we haven't reached the limit and friend isn't already tagged
       if (prev.length < MAX_FRIENDS && !prev.some((f) => f.uid === friend.uid)) {
         return [...prev, friend];
       }
@@ -90,6 +85,34 @@ export function CreateMilestone({ friends }: { friends: Friend[] }) {
 
   const handleRemoveTag = (friend: Friend) => {
     setTaggedFriends((prev) => prev.filter((f) => f.uid !== friend.uid));
+  };
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      if (!file.type.startsWith("image/")) {
+        setStatusMessage("Please select a valid image file.");
+        setStatusType("error");
+        setSelectedFile(null);
+        setImagePreview(null);
+        return;
+      }
+      if (file.size > 5 * 1024 * 1024) { // 5MB limit
+        setStatusMessage("Image file size must be less than 5MB.");
+        setStatusType("error");
+        setSelectedFile(null);
+        setImagePreview(null);
+        return;
+      }
+      setSelectedFile(file);
+      const previewUrl = URL.createObjectURL(file);
+      setImagePreview(previewUrl);
+      setStatusMessage(null);
+      setStatusType(null);
+    } else {
+      setSelectedFile(null);
+      setImagePreview(null);
+    }
   };
 
   const setFormSubmitFunction = useCallback((fn: any) => {
@@ -105,7 +128,6 @@ export function CreateMilestone({ friends }: { friends: Friend[] }) {
       return;
     }
 
-    // Clear any existing timeout
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
     }
@@ -117,39 +139,38 @@ export function CreateMilestone({ friends }: { friends: Friend[] }) {
     try {
       const formData = await submitForm();
 
-      if (!formData) {
+      if (!formData || !formData.description || !formData.milestone_date) {
         setStatusMessage("Please fill out the milestone details correctly.");
         setStatusType("error");
         setIsSubmitting(false);
         return;
       }
 
-      const payload = {
-        ...formData,
-        taggedFriendIds: taggedFriends.map((f) => f.uid),
-      };
-
-      console.log("Submitting payload:", payload);
+      const payload = new FormData();
+      payload.append("description", formData.description);
+      payload.append("milestone_date", formData.milestone_date);
+      payload.append("taggedFriendIds", JSON.stringify(taggedFriends.map((f) => f.uid)));
+      payload.append("fee", getApplicableFee() || "");
+      if (selectedFile) {
+        payload.append("image", selectedFile);
+      }
 
       const res = await fetch("/api/milestone/create", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          payload: payload,
-          fee: getApplicableFee(),
-        }),
+        body: payload,
       });
 
       if (res.ok) {
         setStatusMessage("Milestone created successfully!");
         setStatusType("success");
+        setSelectedFile(null);
+        setImagePreview(null);
       } else {
         const errorData = await res.json().catch(() => null);
         setStatusMessage(`Error creating milestone: ${errorData?.message || res.statusText}`);
         setStatusType("error");
       }
 
-      // Set a single timeout to clear the status
       timeoutRef.current = setTimeout(() => {
         setStatusMessage(null);
         setStatusType(null);
@@ -158,8 +179,6 @@ export function CreateMilestone({ friends }: { friends: Friend[] }) {
       console.error("Error in form submission:", error);
       setStatusMessage(`An error occurred: ${error instanceof Error ? error.message : String(error)}`);
       setStatusType("error");
-
-      // Set a single timeout to clear the status
       timeoutRef.current = setTimeout(() => {
         setStatusMessage(null);
         setStatusType(null);
@@ -229,7 +248,7 @@ export function CreateMilestone({ friends }: { friends: Friend[] }) {
               </div>
               <div className="mt-3 pt-3 border-t border-gray-700">
                 <p className="text-white">
-                  Current cost:{" "}
+                  CurrentSyCurrent cost:{" "}
                   <span className="text-purple-400 font-medium">{getApplicableFee() || "0"} MST</span>
                   {taggedFriends.length > 0 && (
                     <span className="text-gray-400 text-xs ml-2">(Group milestone)</span>
@@ -242,6 +261,31 @@ export function CreateMilestone({ friends }: { friends: Friend[] }) {
       </div>
 
       <MilestoneForm setSubmitForm={setFormSubmitFunction} />
+
+      <div className="mt-6">
+        <label htmlFor="image-upload" className="text-white text-lg font-medium">
+          Upload Image (Optional)
+        </label>
+        <input
+          id="image-upload"
+          type="file"
+          accept="image/*"
+          onChange={handleFileChange}
+          className="mt-2 block w-full text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-purple-600 file:text-white hover:file:bg-purple-700"
+        />
+        {imagePreview && (
+          <div className="mt-4">
+            <p className="text-white mb-2">Image Preview:</p>
+            <img
+              src={imagePreview}
+              alt="Milestone preview"
+              className="max-w-full h-auto rounded-md border border-gray-700"
+              style={{ maxHeight: "200px" }}
+            />
+          </div>
+        )}
+      </div>
+
       <div className="mt-8">
         <h2 className="text-xl text-white mb-2">
           Tag Friends
@@ -249,19 +293,17 @@ export function CreateMilestone({ friends }: { friends: Friend[] }) {
             ({taggedFriends.length}/{MAX_FRIENDS} max)
           </span>
         </h2>
-        
         {taggedFriends.length >= MAX_FRIENDS ? (
           <div className="text-amber-400 text-sm mb-3 p-2 bg-amber-900/20 rounded-md">
             Maximum number of friends reached (4)
           </div>
         ) : (
-          <TagFriendDropdown 
-            friends={friends} 
-            taggedFriends={taggedFriends} 
-            onSelect={handleTagSelect} 
+          <TagFriendDropdown
+            friends={friends}
+            taggedFriends={taggedFriends}
+            onSelect={handleTagSelect}
           />
         )}
-
         {taggedFriends.length > 0 && (
           <div className="mt-4 p-3 bg-[#222] rounded-md">
             <h3 className="text-gray-300 text-sm mb-2">Tagged friends ({taggedFriends.length}):</h3>

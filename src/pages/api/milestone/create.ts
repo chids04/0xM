@@ -2,27 +2,36 @@ import type { APIRoute } from "astro";
 import { app } from "../../../firebase/server";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { getAuth } from "firebase-admin/auth";
+import { getStorage } from "firebase-admin/storage";
 import { ethers } from "ethers";
 import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
+import { fileURLToPath } from "url";
+import { dirname } from "path";
 
 import { createMetaTxRequest } from "../wallet/helpers/CreateMetaTx";
 
 const ENCRYPTION_KEY: string = import.meta.env.ENCRYPTION_KEY;
-if(!ENCRYPTION_KEY){
+if (!ENCRYPTION_KEY) {
   throw new Error("missing encryption key");
 }
 
-// Function to hash milestone data for blockchain verification
 function hashMilestone(data: any) {
-  return crypto.createHash("sha256").update(JSON.stringify(data)).digest("hex");
+  // Only include fields that are hashed
+  const hashableData = {
+    id: data.id,
+    description: data.description,
+    milestone_date: data.milestone_date,
+    image: data.image,
+    owner: data.owner,
+    participants: data.participants,
+    taggedFriendIds: data.taggedFriendIds,
+    createdAt: data.createdAt,
+  };
+  return crypto.createHash("sha256").update(JSON.stringify(hashableData)).digest("hex");
 }
-
-
 
 function decryptPrivateKey(encryptedData: string): string {
   const [iv, encrypted] = encryptedData.split(":");
@@ -40,124 +49,166 @@ function decryptPrivateKey(encryptedData: string): string {
   return decrypted;
 }
 
-function createErrorResponse(
-  code: string, 
-  message: string, 
-  status: number
-) {
+function createErrorResponse(code: string, message: string, status: number) {
   console.error(`${code}: ${message}`);
   return new Response(
-      JSON.stringify({ 
-          success: false, 
-          error: { code, message } 
-      }),
-      { 
-          status, 
-          headers: { "Content-Type": "application/json" } 
-      }
+    JSON.stringify({
+      success: false,
+      error: { code, message },
+    }),
+    {
+      status,
+      headers: { "Content-Type": "application/json" },
+    }
   );
 }
 
 export const POST: APIRoute = async ({ request, cookies }) => {
+  let uploadedFile: string | null = null; // Track uploaded file for cleanup
+  let storage
   try {
-    const data = await request.json()
-    const { description, milestone_date, image, taggedFriendIds } = data.payload;
-    const fee = data.fee
+    // Parse multipart form data
+    const formData = await request.formData();
+
+    // Extract form fields
+    const description = formData.get("description")?.toString();
+    const milestone_date = formData.get("milestone_date")?.toString();
+    const fee = formData.get("fee")?.toString();
+    const taggedFriendIdsRaw = formData.get("taggedFriendIds")?.toString();
+    const taggedFriendIds = taggedFriendIdsRaw ? JSON.parse(taggedFriendIdsRaw) : [];
+    const imageFile = formData.get("image");
+
+    // Validate required fields
     if (!description || !milestone_date) {
-      return new Response(
-        JSON.stringify({ error: "Missing required fields." }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
+      return createErrorResponse("VALIDATION_ERROR", "Missing required fields.", 400);
+    }
+
+    // Load blockchain configuration
+    const tracker_adr = import.meta.env.MILESTONE_TRACKER_ADDRESS;
+    const token_adr = import.meta.env.MST_TOKEN_ADDRESS;
+    const relayer_adr = import.meta.env.MILESTONE_RELAYER_ADDRESS;
+    const forwarder_adr = import.meta.env.FORWARDER_ADDRESS;
+
+    if (!tracker_adr || !relayer_adr || !forwarder_adr || !token_adr) {
+      return createErrorResponse(
+        "CONFIG_ERROR",
+        "Missing tracker, token, forwarder or relayer address, SERVER ERROR",
+        500
       );
     }
 
-    const tracker_adr = import.meta.env.MILESTONE_TRACKER_ADDRESS;
-    const token_adr = import.meta.env.MST_TOKEN_ADDRESS;
-    const relayer_adr = import.meta.env.MILESTONE_RELAYER_ADDRESS
-    const forwarder_adr = import.meta.env.FORWARDER_ADDRESS
-        
-    if (!tracker_adr || !relayer_adr || !forwarder_adr || !token_adr) {
-        return createErrorResponse(
-            "CONFIG_ERROR", 
-            "Missing tracker, token, forwarder or relayer address, SERVER ERROR", 
-            500
-        );
-
-    }
-
-    const ADMIN_PRIV = import.meta.env.ADMIN_PRIV_KEY
-    if(!ADMIN_PRIV){
-        return createErrorResponse("SERVER_ERROR", "Admin unavailiable to sign transaction, try again later", 500)
+    const ADMIN_PRIV = import.meta.env.ADMIN_PRIV_KEY;
+    if (!ADMIN_PRIV) {
+      return createErrorResponse(
+        "SERVER_ERROR",
+        "Admin unavailable to sign transaction, try again later",
+        500
+      );
     }
 
     const trackerABI = import.meta.env.MILESTONE_TRACKER_ABI;
-    const relayerABI = import.meta.env.MILESTONE_RELAYER_ABI
-    const tokenABI = import.meta.env.MST_TOKEN_ABI
-    const forwarderABI = import.meta.env.FORWARDER_ABI
+    const relayerABI = import.meta.env.MILESTONE_RELAYER_ABI;
+    const tokenABI = import.meta.env.MST_TOKEN_ABI;
+    const forwarderABI = import.meta.env.FORWARDER_ABI;
     let tracker_abi, relayer_abi, forwarder_abi, token_abi;
-    
+
     if (!trackerABI || !relayerABI || !forwarderABI || !tokenABI) {
-        return createErrorResponse(
-            "CONFIG_ERROR", 
-            "Missing tracker, token, forwader or relayer ABI, SERVER ERROR", 
-            500
-        );
+      return createErrorResponse(
+        "CONFIG_ERROR",
+        "Missing tracker, token, forwarder or relayer ABI, SERVER ERROR",
+        500
+      );
     }
-    
+
     try {
-        const __filename = fileURLToPath(import.meta.url);
-        const __dirname = dirname(__filename);
-        const projectRoot = join(__dirname, '../../../../blockchain');
-        const trackerArtifact = JSON.parse(readFileSync(join(projectRoot, trackerABI), 'utf8'));
-        const relayerArtifact = JSON.parse(readFileSync(join(projectRoot, relayerABI), 'utf8'));
-        const forwarderArtifact = JSON.parse(readFileSync(join(projectRoot, forwarderABI), 'utf8'));
-        const tokenArtifact = JSON.parse(readFileSync(join(projectRoot, tokenABI), 'utf8'));
-        tracker_abi = trackerArtifact.abi;
-        relayer_abi = relayerArtifact.abi
-        forwarder_abi = forwarderArtifact.abi
-        token_abi = tokenArtifact.abi
-        
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = dirname(__filename);
+      const projectRoot = join(__dirname, "../../../../blockchain");
+      const trackerArtifact = JSON.parse(readFileSync(join(projectRoot, trackerABI), "utf8"));
+      const relayerArtifact = JSON.parse(readFileSync(join(projectRoot, relayerABI), "utf8"));
+      const forwarderArtifact = JSON.parse(readFileSync(join(projectRoot, forwarderABI), "utf8"));
+      const tokenArtifact = JSON.parse(readFileSync(join(projectRoot, tokenABI), "utf8"));
+      tracker_abi = trackerArtifact.abi;
+      relayer_abi = relayerArtifact.abi;
+      forwarder_abi = forwarderArtifact.abi;
+      token_abi = tokenArtifact.abi;
     } catch (error) {
-        console.error("ABI loading error:", error);
-        return createErrorResponse(
-            "BLOCKCHAIN_ERROR", 
-            "Failed to load tracker, token, relayer or forwader ABI", 
-            500
-        );
+      console.error("ABI loading error:", error);
+      return createErrorResponse(
+        "BLOCKCHAIN_ERROR",
+        "Failed to load tracker, token, relayer or forwarder ABI",
+        500
+      );
     }
+
     const provider = new ethers.JsonRpcProvider(
       import.meta.env.ETHEREUM_RPC_URL || "http://localhost:8545"
     );
 
     const auth = getAuth(app);
     const db = getFirestore(app);
+    storage = getStorage(app);
 
+    // Authenticate user
     const sessionCookie = cookies.get("__session")?.value;
     if (!sessionCookie) {
-      return new Response(
-        JSON.stringify({ message: "Unauthorized" }),
-        { status: 401, headers: { "Content-Type": "application/json" } }
-      );
+      return createErrorResponse("AUTH_ERROR", "Unauthorized", 401);
     }
 
     let decodedCookie;
     try {
       decodedCookie = await auth.verifySessionCookie(sessionCookie);
     } catch (err) {
-      return new Response(
-        JSON.stringify({ message: "Invalid session" }),
-        { status: 401, headers: { "Content-Type": "application/json" } }
-      );
+      return createErrorResponse("AUTH_ERROR", "Invalid session", 401);
     }
 
     const uid = decodedCookie.uid;
-    
 
     const milestoneId = uuidv4();
+    let imageUrl = "";
+
+    // Upload image to Firebase Storage if provided
+    if (imageFile instanceof File) {
+      // Validate file type
+      if (!imageFile.type.startsWith("image/")) {
+        return createErrorResponse("VALIDATION_ERROR", "Invalid file type. Only images are allowed.", 400);
+      }
+      // Validate file size (5MB limit)
+      if (imageFile.size > 5 * 1024 * 1024) {
+        return createErrorResponse("VALIDATION_ERROR", "File size exceeds 5MB limit.", 400);
+      }
+
+      const bucket = storage.bucket("nft-images");
+      const fileName = `milestones/${milestoneId}/${imageFile.name || "image"}`;
+      const file = bucket.file(fileName);
+      console.log("hello")
+      uploadedFile = fileName; // Track for cleanup
+
+      // Read file buffer
+      const arrayBuffer = await imageFile.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+
+      // Upload to Firebase Storage
+      await file.save(buffer, {
+        metadata: {
+          contentType: imageFile.type,
+        },
+      });
+
+      // Get signed URL
+      const [url] = await file.getSignedUrl({
+        action: "read",
+        expires: "03-01-2500", // Long expiration
+      });
+      imageUrl = url;
+    }
+
+    // Prepare milestone data for hashing
     const milestoneDataForHash = {
       id: milestoneId,
       description,
       milestone_date,
-      image: image || "",
+      image: imageUrl, // Include image URL in hash
       owner: uid,
       participants: [] as string[],
       taggedFriendIds: taggedFriendIds || [],
@@ -165,7 +216,6 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       createdAt: new Date().toISOString(),
       hash: "",
     };
-    
 
     // Get encrypted private key from Firebase
     let encryptedPrivKey;
@@ -180,18 +230,25 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       const walletData = walletDoc.data();
       encryptedPrivKey = walletData?.encryptedPrivateKey;
     } else {
-      return new Response(
-        JSON.stringify({ message: "User wallet not found." }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
+      // Cleanup image if wallet is missing
+      if (uploadedFile) {
+        await storage.bucket().file(uploadedFile).delete().catch((err) => {
+          console.error("Failed to clean up image:", err);
+        });
+      }
+      return createErrorResponse("WALLET_ERROR", "User wallet not found.", 400);
     }
 
     // Populate participants with public keys for group milestones
-    let isGroupMs
+    let isGroupMs = false;
     if (taggedFriendIds && taggedFriendIds.length > 0) {
-      isGroupMs = true
+      isGroupMs = true;
       for (const friendId of taggedFriendIds) {
-        const walletRef = db.collection("users").doc(friendId).collection("wallet").doc("wallet_info");
+        const walletRef = db
+          .collection("users")
+          .doc(friendId)
+          .collection("wallet")
+          .doc("wallet_info");
         const friendWalletDoc = await walletRef.get();
         const friendUser = await auth.getUser(friendId);
         const email = friendUser.email;
@@ -202,77 +259,69 @@ export const POST: APIRoute = async ({ request, cookies }) => {
             milestoneDataForHash.participants.push(friendPublicKey);
           }
         } else {
-          return new Response(
-            JSON.stringify({
-              message: `${email} is missing a private/public key. Tell them to generate one in settings.`,
-              errorCode: "BLOCKCHAIN_TRANSACTION_FAILED",
-            }),
-            { status: 500, headers: { "Content-Type": "application/json" } }
+          // Cleanup image if friend wallet is missing
+          if (uploadedFile) {
+            storage.bucket().file(uploadedFile).delete().catch((err) => {
+              console.error("Failed to clean up image:", err);
+            });
+          }
+          return createErrorResponse(
+            "WALLET_ERROR",
+            `${email} is missing a private/public key. Tell them to generate one in settings.`,
+            500
           );
         }
       }
     }
 
-    // Calculate hash
+    // Calculate hash with image URL
     const milestoneHash = hashMilestone(milestoneDataForHash);
     milestoneDataForHash.hash = milestoneHash;
 
-    const adminWallet = new ethers.Wallet(ADMIN_PRIV, provider) 
-    const userWallet = new ethers.Wallet(decryptPrivateKey(encryptedPrivKey), provider)
+    const adminWallet = new ethers.Wallet(ADMIN_PRIV, provider);
+    const userWallet = new ethers.Wallet(decryptPrivateKey(encryptedPrivKey), provider);
 
-    //check if user has balance for this transaction
-    const token_contract = new ethers.Contract(
-      token_adr,
-      token_abi,
-      userWallet
-    )
+    // Check if user has balance for this transaction
+    const token_contract = new ethers.Contract(token_adr, token_abi, userWallet);
 
-    const relayerContract = new ethers.Contract(
-      relayer_adr,
-      relayer_abi,
-      adminWallet
-    )
+    const relayerContract = new ethers.Contract(relayer_adr, relayer_abi, adminWallet);
 
-
-    const bal = await token_contract.balanceOf(await userWallet.getAddress())
+    const bal = await token_contract.balanceOf(await userWallet.getAddress());
     const [
-      addMilestoneFee, 
-      addGroupMilestoneFee, 
-      signMilestoneFee, 
-      tier1DiscountPercent, 
-      tier2DiscountPercent
+      addMilestoneFee,
+      addGroupMilestoneFee,
+      signMilestoneFee,
+      tier1DiscountPercent,
+      tier2DiscountPercent,
     ] = await relayerContract.getMilestoneFees();
 
-    
-    if(isGroupMs){
-      if( addGroupMilestoneFee > bal){
+    if (isGroupMs) {
+      if (addGroupMilestoneFee > bal) {
+        // Cleanup image on insufficient funds
+        if (uploadedFile) {
+          await storage.bucket().file(uploadedFile).delete().catch((err) => {
+            console.error("Failed to clean up image:", err);
+          });
+        }
         return createErrorResponse("INSUFFICIENT_FUNDS", "Insufficient funds", 400);
       }
-
-      await token_contract.approve(
-        relayer_adr,
-        addGroupMilestoneFee
-      )
-    }
-
-    else{
-      //approve the relayer to take the fee from the user
-      if(addMilestoneFee > bal){
-
+      await token_contract.approve(relayer_adr, addGroupMilestoneFee);
+    } else {
+      if (addMilestoneFee > bal) {
+        // Cleanup image on insufficient funds
+        if (uploadedFile) {
+          await storage.bucket().file(uploadedFile).delete().catch((err) => {
+            console.error("Failed to clean up image:", err);
+          });
+        }
         return createErrorResponse("INSUFFICIENT_FUNDS", "Insufficient Funds", 400);
       }
-      await token_contract.approve(
-        relayer_adr,
-        addMilestoneFee
-      )
+      await token_contract.approve(relayer_adr, addMilestoneFee);
     }
 
-    
     let query, tx;
-
     let isGroup = false;
     if (!taggedFriendIds || taggedFriendIds.length === 0) {
-
       query = await createMetaTxRequest(
         userWallet,
         forwarder_adr,
@@ -281,10 +330,8 @@ export const POST: APIRoute = async ({ request, cookies }) => {
         tracker_abi,
         "addMilestone",
         [milestoneDataForHash.description, milestoneHash, milestoneId]
-      )
-
-      tx = await relayerContract.relayAddMilestone(query)
-
+      );
+      tx = await relayerContract.relayAddMilestone(query);
     } else {
       isGroup = true;
       query = await createMetaTxRequest(
@@ -295,80 +342,87 @@ export const POST: APIRoute = async ({ request, cookies }) => {
         tracker_abi,
         "addGroupMilestone",
         [milestoneDataForHash.description, milestoneDataForHash.participants, milestoneHash, milestoneId]
-      )
-
-      tx = await relayerContract.relayAddGroupMilestone(query)
-
+      );
+      tx = await relayerContract.relayAddGroupMilestone(query);
     }
 
     console.log("Waiting for transaction to be mined...");
-    const receipt = await tx.wait()
+    const receipt = await tx.wait();
     console.log("Transaction confirmed:", receipt);
 
     if (receipt.status !== 1) {
-      return new Response(
-        JSON.stringify({
-          message: "Blockchain transaction failed. Milestone not created.",
-          errorCode: "BLOCKCHAIN_TRANSACTION_FAILED",
-        }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
+      // Cleanup image on blockchain failure
+      if (uploadedFile) {
+        await storage.bucket().file(uploadedFile).delete().catch((err) => {
+          console.error("Failed to clean up image:", err);
+        });
+      }
+      return createErrorResponse(
+        "BLOCKCHAIN_TRANSACTION_FAILED",
+        "Blockchain transaction failed. Milestone not created.",
+        500
       );
     }
 
-
-    //if here then transaction was succesful
-    let milestoneData = { ...milestoneDataForHash};
-
+    let milestoneData = { ...milestoneDataForHash };
     const milestoneRef = db.collection("milestones").doc(milestoneId);
     const ownerRef = db.collection("users").doc(uid).collection("milestones");
 
-    if(isGroup){
-      const milestoneForParticipant = {
-        ...milestoneData,
-        signatureCount: 0,
-      };
-      
-      await milestoneRef.set(milestoneForParticipant);
-      const pendingRef = ownerRef.doc("pending");
-    
-      if (!(await pendingRef.get()).exists) {
-        await pendingRef.set({ milestoneRefs: [milestoneRef] });
-      }else{
-        await pendingRef.update({
-          milestoneRefs: FieldValue.arrayUnion(milestoneRef)
-        })
-      }
-      
+    try {
+      if (isGroup) {
+        const milestoneForParticipant = {
+          ...milestoneData,
+          signatureCount: 0,
+        };
+        await milestoneRef.set(milestoneForParticipant);
+        const pendingRef = ownerRef.doc("pending");
 
-      for (const friendId of taggedFriendIds) {
-        const friendPendingRef = db
-          .collection("users")
-          .doc(friendId)
-          .collection("milestones")
-          .doc("pending");
-        
-        if (!(await friendPendingRef.get()).exists) {
-          await friendPendingRef.set({ milestoneRefs: [milestoneRef] });
+        if (!(await pendingRef.get()).exists) {
+          await pendingRef.set({ milestoneRefs: [milestoneRef] });
         } else {
-          await friendPendingRef.update({
-            milestoneRefs: FieldValue.arrayUnion(milestoneRef)
+          await pendingRef.update({
+            milestoneRefs: FieldValue.arrayUnion(milestoneRef),
+          });
+        }
+
+        for (const friendId of taggedFriendIds) {
+          const friendPendingRef = db
+            .collection("users")
+            .doc(friendId)
+            .collection("milestones")
+            .doc("pending");
+          if (!(await friendPendingRef.get()).exists) {
+            await friendPendingRef.set({ milestoneRefs: [milestoneRef] });
+          } else {
+            await friendPendingRef.update({
+              milestoneRefs: FieldValue.arrayUnion(milestoneRef),
+            });
+          }
+        }
+      } else {
+        await milestoneRef.set(milestoneData);
+        const acceptedRef = ownerRef.doc("accepted");
+
+        if (!(await acceptedRef.get()).exists) {
+          await acceptedRef.set({ milestoneRefs: [milestoneRef] });
+        } else {
+          await acceptedRef.update({
+            milestoneRefs: FieldValue.arrayUnion(milestoneRef),
           });
         }
       }
-    }else{
-      milestoneRef.set(milestoneData)
-      const acceptedRef = ownerRef.doc("accepted")
-
-      if (!(await acceptedRef.get()).exists) {
-        await acceptedRef.set({ milestoneRefs: [milestoneRef] });
-      }else{
-        await acceptedRef.update({
-          milestoneRefs: FieldValue.arrayUnion(milestoneRef)
+    } catch (firestoreError) {
+      // Cleanup image on Firestore failure
+      if (uploadedFile) {
+        await storage.bucket().file(uploadedFile).delete().catch((err) => {
+          console.error("Failed to clean up image:", err);
         });
       }
-
-
+      throw firestoreError;
     }
+
+    // Clear uploadedFile since we succeeded
+    uploadedFile = null;
 
     return new Response(
       JSON.stringify({
@@ -382,16 +436,18 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
-  } catch (ethError: any) {
-
-    console.error("Blockchain transaction failed:", ethError);
-    return new Response(
-      JSON.stringify({
-        message: "Blockchain transaction failed. Milestone not created.",
-        error: "Transaction error",
-        errorCode: "BLOCKCHAIN_TRANSACTION_FAILED",
-      }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
+  } catch (error: any) {
+    // Cleanup image on any unhandled error
+    if (uploadedFile) {
+      await storage.bucket().file(uploadedFile).delete().catch((err) => {
+        console.error("Failed to clean up image:", err);
+      });
+    }
+    console.error("Error:", error);
+    return createErrorResponse(
+      "SERVER_ERROR",
+      error.message || "An error occurred while processing the request.",
+      500
     );
-  } 
+  }
 };

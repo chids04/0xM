@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useCallback, useState } from "react";
+import React, { useEffect, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -31,11 +31,6 @@ const milestoneSchema = z.object({
       message: "Invalid date format. Please use YYYY-MM-DD.",
     }
   ),
-  image: z
-    .string()
-    .url({ message: "Please enter a valid URL (e.g., https://example.com/image.jpg)." })
-    .optional()
-    .or(z.literal("")), // Allow empty string for optional field
 });
 
 type MilestoneSchemaType = z.infer<typeof milestoneSchema>;
@@ -50,12 +45,9 @@ export function MilestoneForm({ setSubmitForm }: MilestoneFormProps) {
     defaultValues: {
       description: "",
       milestone_date: "",
-      image: "",
     },
     mode: "onChange",
   });
-
-  const [imagePreview, setImagePreview] = useState<string>("");
 
   const submitFormFn = useCallback(async () => {
     const isValid = await form.trigger();
@@ -68,16 +60,6 @@ export function MilestoneForm({ setSubmitForm }: MilestoneFormProps) {
   useEffect(() => {
     setSubmitForm(submitFormFn);
   }, [setSubmitForm, submitFormFn]);
-
-  // Watch the image field and update preview
-  const imageValue = form.watch("image");
-  useEffect(() => {
-    if (imageValue && z.string().url().safeParse(imageValue).success) {
-      setImagePreview(imageValue);
-    } else {
-      setImagePreview("");
-    }
-  }, [imageValue]);
 
   return (
     <Form {...form}>
@@ -120,39 +102,6 @@ export function MilestoneForm({ setSubmitForm }: MilestoneFormProps) {
                 Select the date when this milestone should be completed.
               </FormDescription>
               <FormMessage />
-            </FormItem>
-          )}
-        />
-
-        <FormField
-          control={form.control}
-          name="image"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel className="text-white">Image URL</FormLabel>
-              <FormControl>
-                <Input
-                  type="url"
-                  placeholder="Enter image URL (e.g., https://example.com/image.jpg)"
-                  className="bg-[#1f1f1f] text-white border border-[#333333] rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  {...field}
-                />
-              </FormControl>
-              <FormDescription className="text-gray-400">
-                Enter the URL of an image to represent this milestone (optional).
-              </FormDescription>
-              <FormMessage />
-              {imagePreview && (
-                <div className="mt-2">
-                  <p className="text-white mb-1">Preview:</p>
-                  <img
-                    src={imagePreview}
-                    alt="Milestone preview"
-                    className="max-w-full h-auto rounded-md border border-gray-700"
-                    onError={() => setImagePreview("")}
-                  />
-                </div>
-              )}
             </FormItem>
           )}
         />

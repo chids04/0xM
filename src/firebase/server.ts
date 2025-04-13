@@ -3,6 +3,8 @@ import { initializeApp, cert, getApps } from "firebase-admin/app";
 
 process.env['FIRESTORE_EMULATOR_HOST'] = 'localhost:8080';
 process.env['FIREBASE_AUTH_EMULATOR_HOST'] = 'localhost:9099';
+process.env['FIREBASE_STORAGE_EMULATOR_HOST'] = 'localhost:9199';
+
 
 const activeApps = getApps();
 
@@ -24,7 +26,6 @@ const serviceAccount = {
 const initApp = () => {
   if (import.meta.env.PROD) {
     console.info('PROD env detected. Using default service account.')
-    // Use default config in firebase functions. Should be already injected in the server by Firebase.
     return initializeApp()
   }
   console.info('Loading service account from env.')
@@ -33,5 +34,4 @@ const initApp = () => {
   })
 }
 
-//export const app = initializeApp({projectId: 'milestone-tracker-15187'})
-export const app = activeApps.length === 0 ? initializeApp({projectId: 'milestone-tracker-15187'}) : activeApps[0];
+export const app = activeApps.length === 0 ? initializeApp({credential: cert(serviceAccount as ServiceAccount),projectId: "milestone-tracker-15187", storageBucket: "nft-images"}) : activeApps[0];

@@ -1,9 +1,6 @@
 {
-  "firestore" : {
-    "rules" : "firestore.rules"
-  },
-
   "emulators": {
+    "singleProjectMode": true,
     "auth": {
       "port": 9099
     },
@@ -13,6 +10,11 @@
     "ui": {
       "enabled": true
     },
-    "singleProjectMode": true
+    "storage": {
+      "port": 9199
+    }
+  },
+  "storage": {
+    "rules": "storage.rules"
   }
 }
