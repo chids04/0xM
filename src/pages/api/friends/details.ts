@@ -24,10 +24,15 @@ export const GET: APIRoute = async ({ request, url }) => {
       // Also get additional data from Firestore if needed
       const userDoc = await db.collection("users").doc(friendId).get();
       const userData = userDoc.exists ? userDoc.data() : {};
+
+      if(!userData){
+        throw new Error("User not found in database")
+      }
       
       // Combine data, prioritizing Auth data
       const result = {
         displayName: userRecord.displayName || userData.displayName || "User",
+        username: userData.username || userRecord.displayName || "User",
         email: userRecord.email || userData.email || "",
         photoURL: userRecord.photoURL || 
                  userData.photoURL || 
@@ -47,8 +52,13 @@ export const GET: APIRoute = async ({ request, url }) => {
         const userDoc = await db.collection("users").doc(friendId).get();
         if (userDoc.exists) {
           const userData = userDoc.data();
+
+          if(!userData){
+            throw new Error("User data does not exist in database")
+          }
           const result = {
             displayName: userData.displayName || "User",
+            username: userData.username || userData.displayName || "User",
             email: userData.email || "",
             photoURL: userData.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${userData.displayName || userData.email || "?"}`,
           };
@@ -91,40 +101,61 @@ export const POST: APIRoute = async ({ request }) => {
     const auth = getAuth(app);
     const db = getFirestore(app);
     
-    // Create a map to store email results
-    const emailMap: Record<string, string> = {};
+    // Create a map to store user details
+    const userDetailsMap: Record<string, { email: string, username: string }> = {};
     
-    // Fetch emails for each friend in parallel
+    // Fetch details for each friend in parallel
     const fetchPromises = friendIds.map(async (friendId) => {
       try {
-        // Try to get user email from Firebase Auth first
+        let email = `user-${friendId.substring(0, 4)}@unknown.com`;
+        let username = `User-${friendId.substring(0, 4)}`;
+        
+        // Try to get user details from Firebase Auth first
         try {
           const userRecord = await auth.getUser(friendId);
-          emailMap[friendId] = userRecord.email || `User-${friendId.substring(0, 4)}`;
+          email = userRecord.email || email;
+          username = userRecord.displayName || username;
         } catch (authError) {
-          // Fallback to Firestore if Auth fails
+          // Auth failed, that's ok, we'll try Firestore
+        }
+        
+        // Try to get additional details from Firestore
+        try {
           const userDoc = await db.collection("users").doc(friendId).get();
           if (userDoc.exists) {
             const userData = userDoc.data();
-            emailMap[friendId] = userData.email || `User-${friendId.substring(0, 4)}`;
-          } else {
-            emailMap[friendId] = `User-${friendId.substring(0, 4)}`;
+
+            if(!userData){
+              throw new Error("User does not exist in database")
+            }
+            // Only override if Firestore has values
+            if (userData.email) email = userData.email;
+            if (userData.username) username = userData.username;
+            else if (userData.displayName) username = userData.displayName;
           }
+        } catch (firestoreError) {
+          console.error(`Error fetching Firestore data for user ${friendId}:`, firestoreError);
         }
+        
+        // Store in our map
+        userDetailsMap[friendId] = { email, username };
       } catch (error) {
-        console.error(`Error fetching email for user ${friendId}:`, error);
-        emailMap[friendId] = `User-${friendId.substring(0, 4)}`;
+        console.error(`Error fetching details for user ${friendId}:`, error);
+        userDetailsMap[friendId] = {
+          email: `user-${friendId.substring(0, 4)}@unknown.com`,
+          username: `User-${friendId.substring(0, 4)}`
+        };
       }
     });
     
     await Promise.all(fetchPromises);
     
     return new Response(
-      JSON.stringify(emailMap),
+      JSON.stringify(userDetailsMap),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
   } catch (error) {
-    console.error("Error processing bulk user emails request:", error);
+    console.error("Error processing bulk user details request:", error);
     return new Response(
       JSON.stringify({ message: "Internal server error" }),
       { status: 500, headers: { "Content-Type": "application/json" } }

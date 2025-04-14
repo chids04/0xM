@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { app } from '../../firebase/client';
 import { doc, getDoc, getFirestore, writeBatch } from 'firebase/firestore';
+import html2canvas from 'html2canvas-pro';
 
 interface SharedMilestoneTimelineProps {
   userId: string;
@@ -11,7 +12,7 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
   const [pendingMilestones, setPendingMilestones] = useState<any[]>([]);
   const [filteredMilestones, setFilteredMilestones] = useState<any[]>([]);
   const [signedMilestones, setSignedMilestones] = useState<any[]>([]);
-  const [participantEmails, setParticipantEmails] = useState<Record<string, string>>({});
+  const [participantDetails, setParticipantDetails] = useState<Record<string, { email: string, username: string }>>({});
   const [searchTerm, setSearchTerm] = useState('');
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [activeTab, setActiveTab] = useState<'active' | 'pending' | 'signed'>('active');
@@ -27,6 +28,19 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
   const [batchVerifying, setBatchVerifying] = useState(false);
   const [batchResults, setBatchResults] = useState<{ total: number, verified: number, failed: number } | null>(null);
 
+  // Preview modal state
+  const [previewData, setPreviewData] = useState<{
+    visible: boolean;
+    milestone: any | null;
+    loading: boolean;
+    error: string | null;
+  }>({
+    visible: false,
+    milestone: null,
+    loading: false,
+    error: null
+  });
+
   useEffect(() => {
     const checkScreenSize = () => {
       setIsMobile(window.innerWidth < 768);
@@ -37,7 +51,7 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
   }, []);
 
   useEffect(() => {
-    const fetchMilestonesAndEmails = async () => {
+    const fetchMilestonesAndDetails = async () => {
       if (!userId) return;
 
       setIsLoading(true);
@@ -213,7 +227,7 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
 
         setPendingMilestones(pendingMilestonesData);
 
-        // Fetch participant emails
+        // Fetch participant details (email and username)
         const allUids = [
           ...new Set([
             ...pendingMilestonesData.flatMap(m => m.taggedFriendIds || []),
@@ -234,18 +248,30 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
             });
 
             if (!response.ok) {
-              throw new Error('Failed to fetch user emails');
+              throw new Error('Failed to fetch user details');
             }
 
-            const emailMap = await response.json();
-            setParticipantEmails(emailMap);
-          } catch (emailError) {
-            console.error('Error fetching emails:', emailError);
-            const fallbackEmailMap = allUids.reduce((acc, uid) => {
-              acc[uid] = `User-${uid.substring(0, 4)}`;
+            const detailsMap = await response.json();
+            // Ensure both email and username are included, fallback to UID-based placeholders if missing
+            const formattedDetails = allUids.reduce((acc, uid) => {
+              acc[uid] = {
+                email: detailsMap[uid]?.email || `user-${uid.substring(0, 4)}@unknown.com`,
+                username: detailsMap[uid]?.username || `User-${uid.substring(0, 4)}`
+              };
               return acc;
-            }, {} as Record<string, string>);
-            setParticipantEmails(fallbackEmailMap);
+            }, {} as Record<string, { email: string, username: string }>);
+
+            setParticipantDetails(formattedDetails);
+          } catch (emailError) {
+            console.error('Error fetching user details:', emailError);
+            const fallbackDetails = allUids.reduce((acc, uid) => {
+              acc[uid] = {
+                email: `user-${uid.substring(0, 4)}@unknown.com`,
+                username: `User-${uid.substring(0, 4)}`
+              };
+              return acc;
+            }, {} as Record<string, { email: string, username: string }>);
+            setParticipantDetails(fallbackDetails);
           }
         }
       } catch (error) {
@@ -255,7 +281,7 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
       }
     };
 
-    fetchMilestonesAndEmails();
+    fetchMilestonesAndDetails();
   }, [userId]);
 
   useEffect(() => {
@@ -300,7 +326,7 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
 
       if (window.innerWidth < 768) {
         milestoneElements.forEach((milestone, i) => {
-          const cardHeight = 340;
+          const cardHeight = 360;
           const verticalPos = cardHeight * i + 10 * i;
           (milestone as HTMLElement).style.top = `${verticalPos}px`;
           (milestone as HTMLElement).style.left = '50%';
@@ -308,7 +334,7 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
       } else {
         const maxAmplitude = containerWidth * 0.3;
         const amplitude = Math.min(maxAmplitude, Math.max(20, (window.innerWidth - 480) / 4));
-        const cardHeight = 300;
+        const cardHeight = 360;
         const totalSpacing = containerHeight - (cardHeight * totalMilestones);
         const spaceBetweenCards = totalSpacing / (totalMilestones || 1);
 
@@ -523,6 +549,54 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
     }
   };
 
+  // Preview handling
+  const handleShowPreview = (milestone: any) => {
+    const status = verificationStatus[milestone.id];
+    if (!status || !status.verified) {
+      alert('Milestone must be verified before previewing.');
+      return;
+    }
+
+    setPreviewData({
+      visible: true,
+      milestone,
+      loading: false,
+      error: null
+    });
+  };
+
+  const handleSaveImage = async () => {
+    if (!previewData.milestone) return;
+    
+    setPreviewData(prev => ({ ...prev, loading: true }));
+    
+    try {
+      const certificateElement = document.getElementById('certificate-container');
+      if (!certificateElement) throw new Error('Certificate element not found');
+
+      const canvas = await html2canvas(certificateElement, {
+        scale: 2,
+        logging: true,
+        useCORS: true,
+        backgroundColor: '#1a1a1a'
+      });
+
+      const image = canvas.toDataURL('image/png');
+      const link = document.createElement('a');
+      link.download = `milestone-${previewData.milestone.id}.png`;
+      link.href = image;
+      link.click();
+
+      setPreviewData(prev => ({ ...prev, loading: false, visible: false }));
+    } catch (error: any) {
+      setPreviewData(prev => ({
+        ...prev,
+        loading: false,
+        error: error.message || 'Failed to save image'
+      }));
+    }
+  };
+
   // Get verification status badge
   const getVerificationBadge = (milestoneId: string) => {
     const status = verificationStatus[milestoneId];
@@ -562,7 +636,7 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
   };
 
   const activeDisplayItems = activeTab === 'active' ? filteredMilestones : activeTab === 'pending' ? pendingMilestones : signedMilestones;
-  const containerHeight = isMobile ? activeDisplayItems.length * 360 : activeDisplayItems.length * 320 + 200;
+  const containerHeight = isMobile ? activeDisplayItems.length * 380 : activeDisplayItems.length * 360 + 200;
 
   // Check if there are any owned milestones for batch verification
   const hasOwnedMilestones = filteredMilestones.some(m => m.owner === userId);
@@ -648,7 +722,6 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
             </div>
           </div>
 
-          {/* Verification Controls - Only for owners with owned milestones */}
           {hasOwnedMilestones && (
             <div className="mb-6 flex flex-wrap gap-4 items-center">
               <button 
@@ -728,33 +801,48 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
                         <span className="bg-purple-500/20 text-purple-300 text-xs px-2 py-1 rounded-full">Shared With You</span>
                       )}
                     </div>
-                    {milestone.image && <img src={milestone.image} alt={milestone.description} className="w-full h-40 object-cover rounded-md mb-2" />}
+                    {milestone.image && (
+                      <img 
+                        src={milestone.image} 
+                        alt={milestone.description} 
+                        className="w-full h-40 object-cover rounded-md mb-2"
+                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                      />
+                    )}
                     <p className="text-white text-lg font-medium mb-2 truncate">{milestone.description}</p>
                     <p className="text-gray-400 mb-1">Date: {new Date(milestone.milestone_date).toLocaleDateString('en-US')}</p>
-                    <p className="text-gray-400 mb-1">Owner: {participantEmails[milestone.owner] || 'Unknown'}</p>
+                    <p className="text-gray-400 mb-1">Owner: {participantDetails[milestone.owner]?.username} ({participantDetails[milestone.owner]?.email})</p>
                     <p className="text-gray-400 mb-1 break-words">
                       Participants:{' '}
                       {(milestone.taggedFriendIds || []).map((uid: string, i: number) => (
                         <span key={uid}>
-                          {participantEmails[uid] || 'Unknown'}
+                          {participantDetails[uid]?.username} ({participantDetails[uid]?.email})
                           {i < milestone.taggedFriendIds.length - 1 ? ', ' : ''}
                         </span>
                       ))}
                     </p>
                     <p className="text-gray-400">Created: {new Date(milestone.createdAt).toLocaleString('en-US')}</p>
                     
-                    {/* Verification Status - Shown for all, but only owner can trigger */}
                     {getVerificationBadge(milestone.id)}
                     
-                    {/* Verify Button - Only for owner */}
-                    {milestone.owner === userId && !verificationStatus[milestone.id]?.loading && (
-                      <button
-                        onClick={() => verifyMilestone(milestone.id)}
-                        className="mt-3 px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-sm rounded transition-colors"
-                      >
-                        Verify
-                      </button>
-                    )}
+                    <div className="mt-3 flex gap-2">
+                      {milestone.owner === userId && !verificationStatus[milestone.id]?.loading && (
+                        <button
+                          onClick={() => verifyMilestone(milestone.id)}
+                          className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-sm rounded transition-colors"
+                        >
+                          Verify
+                        </button>
+                      )}
+                      {milestone.owner === userId && (
+                        <button
+                          onClick={() => handleShowPreview(milestone)}
+                          className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-sm rounded transition-colors"
+                        >
+                          Save
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -769,15 +857,22 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
                         <span className="bg-yellow-500/20 text-yellow-300 text-xs px-2 py-1 rounded-full">Pending Your Approval</span>
                       )}
                     </div>
-                    {milestone.image && <img src={milestone.image} alt={milestone.description} className="w-full h-40 object-cover rounded-md mb-2" />}
+                    {milestone.image && (
+                      <img 
+                        src={milestone.image} 
+                        alt={milestone.description} 
+                        className="w-full h-40 object-cover rounded-md mb-2"
+                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                      />
+                    )}
                     <p className="text-white text-lg font-medium mb-2 truncate">{milestone.description}</p>
                     <p className="text-gray-400 mb-1">Date: {new Date(milestone.milestone_date).toLocaleDateString('en-US')}</p>
-                    <p className="text-gray-400 mb-1">Proposed by: {participantEmails[milestone.owner] || milestone.owner}</p>
+                    <p className="text-gray-400 mb-1">Proposed by: {participantDetails[milestone.owner]?.username} ({participantDetails[milestone.owner]?.email})</p>
                     <p className="text-gray-400 mb-1 break-words">
                       Participants:{' '}
                       {(milestone.taggedFriendIds || []).map((uid: string, i: number) => (
                         <span key={uid} className={uid === userId ? "text-purple-300" : ""}>
-                          {participantEmails[uid] || 'Unknown'}
+                          {participantDetails[uid]?.username} ({participantDetails[uid]?.email})
                           {i < milestone.taggedFriendIds.length - 1 ? ', ' : ''}
                         </span>
                       ))}
@@ -816,15 +911,22 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
                     <div className="mb-2 flex items-center">
                       <span className="bg-green-500/20 text-green-300 text-xs px-2 py-1 rounded-full">Signed by You</span>
                     </div>
-                    {milestone.image && <img src={milestone.image} alt={milestone.description} className="w-full h-40 object-cover rounded-md mb-2" />}
+                    {milestone.image && (
+                      <img 
+                        src={milestone.image} 
+                        alt={milestone.description} 
+                        className="w-full h-40 object-cover rounded-md mb-2"
+                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                      />
+                    )}
                     <p className="text-white text-lg font-medium mb-2 truncate">{milestone.description}</p>
                     <p className="text-gray-400 mb-1">Date: {new Date(milestone.milestone_date).toLocaleDateString('en-US')}</p>
-                    <p className="text-gray-400 mb-1">Owner: {participantEmails[milestone.owner] || 'Unknown'}</p>
+                    <p className="text-gray-400 mb-1">Owner: {participantDetails[milestone.owner]?.username} ({participantDetails[milestone.owner]?.email})</p>
                     <p className="text-gray-400 mb-1 break-words">
                       Participants:{' '}
                       {(milestone.taggedFriendIds || []).map((uid: string, i: number) => (
                         <span key={uid} className={uid === userId ? "text-green-300" : ""}>
-                          {participantEmails[uid] || 'Unknown'}
+                          {participantDetails[uid]?.username} ({participantDetails[uid]?.email})
                           {i < milestone.taggedFriendIds.length - 1 ? ', ' : ''}
                         </span>
                       ))}
@@ -832,23 +934,121 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
                     <p className="text-gray-400">Created: {new Date(milestone.createdAt).toLocaleString('en-US')}</p>
                     {milestone.finalizedAt && <p className="text-gray-400">Finalized: {new Date(milestone.finalizedAt).toLocaleString('en-US')}</p>}
                     
-                    {/* Verification Status - Shown for all, but only owner can trigger */}
                     {getVerificationBadge(milestone.id)}
                     
-                    {/* Verify Button - Only for owner */}
-                    {milestone.owner === userId && !verificationStatus[milestone.id]?.loading && (
-                      <button
-                        onClick={() => verifyMilestone(milestone.id)}
-                        className="mt-3 px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-sm rounded transition-colors"
-                      >
-                        Verify
-                      </button>
-                    )}
+                    <div className="mt-3 flex gap-2">
+                      {milestone.owner === userId && !verificationStatus[milestone.id]?.loading && (
+                        <button
+                          onClick={() => verifyMilestone(milestone.id)}
+                          className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-sm rounded transition-colors"
+                        >
+                          Verify
+                        </button>
+                      )}
+                      {milestone.owner === userId && (
+                        <button
+                          onClick={() => handleShowPreview(milestone)}
+                          className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-sm rounded transition-colors"
+                        >
+                          Save
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}
             </div>
           </div>
+
+          {/* Preview Modal */}
+          {previewData.visible && (
+            <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="relative bg-[#1a1a1a] rounded-xl max-w-2xl w-full p-6 border border-purple-500/20">
+                <button
+                  onClick={() => setPreviewData(prev => ({ ...prev, visible: false }))}
+                  className="absolute top-4 right-4 text-gray-400 hover:text-white transition-colors"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+
+                <h3 className="text-xl font-bold text-white mb-4">Preview Certificate</h3>
+                
+                <div id="certificate-container" className="p-6 bg-[#1a1a1a] rounded-lg">
+                  <div className="text-center mb-8">
+                    <h2 className="text-2xl font-bold text-white mb-2">
+                      {previewData.milestone.description}
+                    </h2>
+                  </div>
+
+                  <div className="mb-8">
+                    {previewData.milestone.image && (
+                      <div className="mt-4 flex justify-center">
+                        <img
+                          src={previewData.milestone.image}
+                          alt="Milestone"
+                          className="max-w-full h-auto rounded-lg"
+                          style={{ maxHeight: '200px' }}
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                          }}
+                        />
+                      </div>
+                    )}
+                    <div className="mt-4 bg-[#252525] p-4 rounded-lg">
+                      <p className="text-gray-400 text-sm mb-1">Participants</p>
+                      <p className="text-white">
+                        <>
+                          <span className="font-medium">{participantDetails[previewData.milestone.owner]?.username} </span>
+                          {(previewData.milestone.taggedFriendIds || []).length > 0 && <span className="mx-1">•</span>}
+                          {(previewData.milestone.taggedFriendIds || []).map((uid: string, i: number) => (
+                            <span key={uid}>
+                              {participantDetails[uid]?.username}
+                              {i < previewData.milestone.taggedFriendIds.length - 1 ? ', ' : ''}
+                            </span>
+                          ))}
+                        </>
+                      </p>
+                    </div>
+                    <div className="mt-6 bg-[#252525] p-4 rounded-lg">
+                      <p className="text-gray-400 text-sm mb-1">date</p>
+                      <p className="text-white">
+                        {new Date(previewData.milestone.createdAt).toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-6 flex justify-end gap-3">
+                  <button
+                    onClick={() => setPreviewData(prev => ({ ...prev, visible: false }))}
+                    className="px-4 py-2 text-gray-400 hover:text-white transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSaveImage}
+                    disabled={previewData.loading}
+                    className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors disabled:opacity-50 flex items-center"
+                  >
+                    {previewData.loading ? (
+                      <>
+                        <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2" />
+                        Saving...
+                      </>
+                    ) : (
+                      'Save Image'
+                    )}
+                  </button>
+                </div>
+
+                {previewData.error && (
+                  <div className="mt-4 text-red-500 text-sm">{previewData.error}</div>
+                )}
+              </div>
+            </div>
+          )}
         </>
       )}
       <style>{styles}</style>
@@ -868,7 +1068,7 @@ const styles = `
     transform: translateX(-50%);
   }
   .milestone-card > div {
-    max-height: 340px;
+    max-height: 380px;
     overflow-x: hidden;
     overflow-y: auto;
   }
@@ -885,7 +1085,7 @@ const styles = `
     .milestone-card > div {
       width: 90vw;
       max-width: 32rem;
-      max-height: 360px;
+      max-height: 380px;
     }
   }
 `;

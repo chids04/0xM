@@ -1,19 +1,24 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { collection, doc, getDoc, getDocs, getFirestore } from 'firebase/firestore';
-import { app } from '../../firebase/client';
+import { app, auth } from '../../firebase/client';
+import { getAuth, onAuthStateChanged } from 'firebase/auth'
 import html2canvas from 'html2canvas-pro';
 
 interface MilestoneTimelineProps {
   userId: string;
+  userName: string;
 }
 
-const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
+const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName }) => {
   const [milestones, setMilestones] = useState<any[]>([]);
   const [filteredMilestones, setFilteredMilestones] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const containerRef = useRef<HTMLDivElement>(null);
   const [isMobile, setIsMobile] = useState(false);
+  const [currentUsername, setCurrentUsername] = useState<string | null>(null);
+  const [firebaseUserInfo, setFirebaseUserInfo] = useState(auth.currentUser);
+
   
   // Verification states
   const [verificationStatus, setVerificationStatus] = useState<Record<string, { verified: boolean, loading: boolean, error?: string }>>({});
@@ -43,9 +48,26 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
     return () => window.removeEventListener('resize', checkScreenSize);
   }, []);
 
+
   // Fetch milestones from Firebase
   useEffect(() => {
     const db = getFirestore(app);
+    const auth = getAuth(app)
+
+    console.log(auth)
+    const user = auth.currentUser
+
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        console.log(user.displayName)
+        setCurrentUsername(user.displayName || 'Anonymous');
+        setFirebaseUserInfo(user);
+      } else {
+        setCurrentUsername(null);
+        setFirebaseUserInfo(null);
+      }
+    });
+
 
     const fetchMilestones = async () => {
       try {
@@ -101,7 +123,7 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
             milestone_date: milestone.milestone_date,
             createdAt: milestone.createdAt,
             id: milestone.id,
-            image: milestone.image, // Include image if available
+            image: milestone.image,
             index,
           }));
 
@@ -301,6 +323,12 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
 
   // Preview handling
   const handleShowPreview = (milestone: any) => {
+    const status = verificationStatus[milestone.id];
+    if (!status || !status.verified) {
+      alert('Milestone must be verified before previewing.');
+      return;
+    }
+
     setPreviewData({
       visible: true,
       milestone,
@@ -491,6 +519,16 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
                   isMobile ? 'w-full max-w-sm' : 'w-[280px]'
                 }`}
               >
+                {milestone.image && (
+                  <img
+                    src={milestone.image}
+                    alt={milestone.description}
+                    className="w-full h-40 object-cover rounded-md mb-4"
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                    }}
+                  />
+                )}
                 <p className="text-white text-lg font-medium mb-2">
                   {milestone.description}
                 </p>
@@ -540,56 +578,42 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId }) => {
 
             <h3 className="text-xl font-bold text-white mb-4">Preview Certificate</h3>
             
-            <div id="certificate-container" className="p-6 bg-[#1a1a1a] rounded-lg">
+            <div
+              id="certificate-container"
+              className="p-6 bg-[#1a1a1a] rounded-lg border border-purple-500"
+            >
               <div className="text-center mb-8">
-                <h2 className="text-2xl font-bold text-white mb-2">
-                  {previewData.milestone.description}
-                </h2>
+              <h2 className="text-2xl font-bold text-white mb-2">
+                {previewData.milestone.description}
+              </h2>
               </div>
 
               <div className="mb-8">
-                {previewData.milestone.image && (
-                  <div className="mt-4 flex justify-center">
-                    <img
-                      src={previewData.milestone.image}
-                      alt="Milestone"
-                      className="max-w-full h-auto rounded-lg"
-                      style={{ maxHeight: '200px' }}
-                      onError={(e) => {
-                        e.currentTarget.style.display = 'none'; // Hide if image fails to load
-                      }}
-                    />
-                  </div>
-                )}
-                <div className="mt-6 bg-[#252525] p-4 rounded-lg">
-                  <p className="text-gray-400 text-sm mb-1">Created At</p>
-                  <p className="text-white">
-                    {new Date(previewData.milestone.createdAt).toLocaleString()}
-                  </p>
+              {previewData.milestone.image && (
+                <div className="mt-4 flex justify-center">
+                <img
+                  src={previewData.milestone.image}
+                  alt="Milestone"
+                  className="max-w-full h-auto rounded-lg"
+                  style={{ maxHeight: '200px' }}
+                  onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                  }}
+                />
                 </div>
+              )}
+              <div className="mt-6 bg-[#252525] p-4 rounded-lg flex items-center justify-center">
+                <p className="text-white text-center">
+                {userName}
+                </p>
               </div>
-
-              <div className="flex justify-between items-center pt-6 border-t border-[#333]">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-[#333] rounded-lg flex items-center justify-center">
-                    <span className="text-gray-400 text-sm">LOGO</span>
-                  </div>
-                  <div>
-                    <p className="text-white text-sm">Verified by</p>
-                    <p className="text-gray-400 text-xs">Chain of Achievements</p>
-                  </div>
-                </div>
-                {verificationStatus[previewData.milestone.id]?.verified && (
-                  <div className="flex items-center gap-2 bg-[#252525] px-4 py-2 rounded-lg">
-                    <div className="w-6 h-6 bg-green-500/20 rounded-full flex items-center justify-center">
-                      <svg className="w-4 h-4 text-green-500" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                      </svg>
-                    </div>
-                    <span className="text-green-500 text-sm">Verified</span>
-                  </div>
-                )}
+              <div className="mt-6 bg-[#252525] p-4 rounded-lg flex justify-center">
+                <p className="text-white text-center">
+                <span className="text-gray-400">date: </span> {new Date(previewData.milestone.createdAt).toLocaleDateString()}
+                </p>
               </div>
+              </div>
+              
             </div>
 
             <div className="mt-6 flex justify-end gap-3">

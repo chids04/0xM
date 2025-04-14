@@ -6,7 +6,7 @@ const user = await Astro.locals.user
 ---
 
 <Layout title = "Shared Milestones" user={user}>
-<MilestoneTimeline client:visible userId={user.uid}></MilestoneTimeline>
+<MilestoneTimeline client:visible userId={user.uid} userName={user.displayName}></MilestoneTimeline>
 </Layout>
 
 <script>
