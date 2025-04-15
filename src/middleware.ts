@@ -10,7 +10,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     try{
     const publicRoutes = ['/dashboard', '/profile', '/personal-milestones',
       '/shared-milestones', '/create-milestone', '/wallet', "/create",
-      "/topup"];
+      "/topup", "/my-nfts"];
     if (!publicRoutes.includes(url.pathname)) {
       return next();
     }

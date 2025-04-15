@@ -12,6 +12,7 @@ import { fileURLToPath } from "url";
 import { dirname } from "path";
 
 import { createMetaTxRequest } from "../wallet/helpers/CreateMetaTx";
+import { createGaslessApproval } from "../wallet/helpers/GaslessApproval"
 
 const ENCRYPTION_KEY: string = import.meta.env.ENCRYPTION_KEY;
 if (!ENCRYPTION_KEY) {
@@ -181,7 +182,6 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       const bucket = storage.bucket("nft-images");
       const fileName = `milestones/${milestoneId}/${imageFile.name || "image"}`;
       const file = bucket.file(fileName);
-      console.log("hello")
       uploadedFile = fileName; // Track for cleanup
 
       // Read file buffer
@@ -282,9 +282,10 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     const userWallet = new ethers.Wallet(decryptPrivateKey(encryptedPrivKey), provider);
 
     // Check if user has balance for this transaction
-    const token_contract = new ethers.Contract(token_adr, token_abi, userWallet);
-
+    const token_contract = new ethers.Contract(token_adr, token_abi, provider);
     const relayerContract = new ethers.Contract(relayer_adr, relayer_abi, adminWallet);
+    const forwarderContract = new ethers.Contract(forwarder_adr, forwarder_abi, provider)
+
 
     const bal = await token_contract.balanceOf(await userWallet.getAddress());
     const [
@@ -294,6 +295,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       tier1DiscountPercent,
       tier2DiscountPercent,
     ] = await relayerContract.getMilestoneFees();
+
 
     if (isGroupMs) {
       if (addGroupMilestoneFee > bal) {
@@ -305,7 +307,22 @@ export const POST: APIRoute = async ({ request, cookies }) => {
         }
         return createErrorResponse("INSUFFICIENT_FUNDS", "Insufficient funds", 400);
       }
-      await token_contract.approve(relayer_adr, addGroupMilestoneFee);
+      //gasless approval here
+
+      const { success, error } = await createGaslessApproval({
+        signer: userWallet,
+        tokenContract: token_contract,
+        forwarder: forwarderContract,
+        relayer: relayerContract,
+        spender: await relayerContract.getAddress(),
+        amount: addGroupMilestoneFee
+      })
+
+      if(!success){
+        return createErrorResponse("BLOCKCHAIN_ERROR", "Error in gasless approval" + error?.message, 501)
+      }
+
+      
     } else {
       if (addMilestoneFee > bal) {
         // Cleanup image on insufficient funds
@@ -316,7 +333,19 @@ export const POST: APIRoute = async ({ request, cookies }) => {
         }
         return createErrorResponse("INSUFFICIENT_FUNDS", "Insufficient Funds", 400);
       }
-      await token_contract.approve(relayer_adr, addMilestoneFee);
+
+      const { success, error } = await createGaslessApproval({
+        signer: userWallet,
+        tokenContract: token_contract,
+        forwarder: forwarderContract,
+        relayer: relayerContract,
+        spender: await relayerContract.getAddress(),
+        amount: addMilestoneFee
+      })
+
+      if(!success){
+        return createErrorResponse("BLOCKCHAIN_ERROR", "Error in gasless approval" + error?.message, 501)
+      }
     }
 
     let query, tx;

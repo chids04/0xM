@@ -353,18 +353,49 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
         backgroundColor: '#1a1a1a'
       });
 
-      const image = canvas.toDataURL('image/png');
-      const link = document.createElement('a');
-      link.download = `milestone-${previewData.milestone.id}.png`;
-      link.href = image;
-      link.click();
+      // Convert canvas to a blob
+      const blob = await new Promise<Blob>((resolve) => {
+        canvas.toBlob((blob) => {
+          if (blob) {
+            resolve(blob);
+          } else {
+            throw new Error('Failed to create image blob');
+          }
+        }, 'image/png');
+      });
 
+      // Create a file object from the blob
+      const fileName = `milestone-${previewData.milestone.id}.png`;
+      const imageFile = new File([blob], fileName, { type: 'image/png' });
+
+      // Create form data for API request
+      const formData = new FormData();
+      formData.append('image', imageFile);
+      formData.append('milestoneId', previewData.milestone.id);
+      formData.append('userId', userId);
+
+      // Make API request to create NFT
+      const response = await fetch('/api/nft/create', { 
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error?.message || 'Failed to mint NFT');
+      }
+
+      const result = await response.json();
+      
+      // Show success notification
+      alert(`NFT minted successfully! Transaction: ${result.transactionHash.substring(0, 10)}...`);
       setPreviewData(prev => ({ ...prev, loading: false, visible: false }));
     } catch (error: any) {
+      console.error('Error minting NFT:', error);
       setPreviewData(prev => ({
         ...prev,
         loading: false,
-        error: error.message || 'Failed to save image'
+        error: error.message || 'Failed to mint NFT'
       }));
     }
   };

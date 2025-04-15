@@ -167,7 +167,7 @@ export function CreateMilestone({ friends }: { friends: Friend[] }) {
         setImagePreview(null);
       } else {
         const errorData = await res.json().catch(() => null);
-        setStatusMessage(`Error creating milestone: ${errorData?.message || res.statusText}`);
+        setStatusMessage(`Error creating milestone: ${errorData.error.message || res.statusText}`);
         setStatusType("error");
       }
 

@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 
 import { createMetaTxRequest } from "../wallet/helpers/CreateMetaTx";
+import { createGaslessApproval } from "../wallet/helpers/GaslessApproval";
 
 const ENCRYPTION_KEY: string = import.meta.env.ENCRYPTION_KEY;
 
@@ -213,6 +214,12 @@ export const POST: APIRoute = async ({ request, cookies }) => {
         adminWallet
       )
 
+      const forwarder_contract = new ethers.Contract(
+        forwarder_adr,
+        forwarder_abi,
+        provider
+      )
+
       const bal = await token_contract.balanceOf(await signerWallet.getAddress())
       const [
         addMilestoneFee, 
@@ -226,12 +233,20 @@ export const POST: APIRoute = async ({ request, cookies }) => {
         return createErrorResponse("TRANSACTION_ERROR", "Insufficient funds to sign milestone", 400)
       }
       else{
-        await token_contract.approve(
-          relayer_adr,
-          signMilestoneFee
-        )
+        const { success, error } = await createGaslessApproval({
+          signer: signerWallet,
+          tokenContract: token_contract,
+          forwarder: forwarder_contract,
+          relayer: relayer_contract,
+          spender: await relayer_contract.getAddress(),
+          amount: signMilestoneFee
+        })
+  
+        if(!success){
+          return createErrorResponse("BLOCKCHAIN_ERROR", "Error in gasless approval" + error?.message, 501)
+        }
       }
-
+      
       const query = await createMetaTxRequest(
         signerWallet,
         forwarder_adr,
@@ -241,9 +256,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
         "signMilestone",
         [ownerAddress, milestoneId]
       )
-
       
-
       const tracker_contract = new ethers.Contract(
         tracker_adr,
         tracker_abi,

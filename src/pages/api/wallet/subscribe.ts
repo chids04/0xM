@@ -8,6 +8,9 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import * as crypto from "crypto";
 
+import { createGaslessApproval } from "./helpers/GaslessApproval";
+import { createMetaTxRequest } from "./helpers/CreateMetaTx";
+
 const ENCRYPTION_KEY: string = import.meta.env.ENCRYPTION_KEY;
 if(!ENCRYPTION_KEY){
   throw new Error("missing encryption key");
@@ -63,23 +66,33 @@ export const POST: APIRoute = async ({ request }) => {
         // Get configuration
         const tokenAddress = import.meta.env.MST_TOKEN_ADDRESS;
         const adminPrivateKey = import.meta.env.ADMIN_PRIV_KEY;
-        if (!tokenAddress || !adminPrivateKey) {
+        const relayerAddress = import.meta.env.MILESTONE_RELAYER_ADDRESS
+        const forwarderAddress = import.meta.env.FORWARDER_ADDRESS
+        
+        if (!tokenAddress || !adminPrivateKey || !relayerAddress || !forwarderAddress) {
             return createErrorResponse("CONFIG_ERROR", "Missing blockchain configuration", 500);
         }
 
         // Load token ABI
         const tokenABIPath = import.meta.env.MST_TOKEN_ABI;
-        if (!tokenABIPath) {
+        const relayerABIPath = import.meta.env.MILESTONE_RELAYER_ABI
+        const forwarderABIPath = import.meta.env.FORWARDER_ABI
+        if (!tokenABIPath || !relayerABIPath || !forwarderABIPath) {
             return createErrorResponse("CONFIG_ERROR", "Missing token contract ABI path", 500);
         }
 
-        let tokenABI;
+        let tokenABI, relayerABI, forwarderABI;
         try {
             const __filename = fileURLToPath(import.meta.url);
             const __dirname = dirname(__filename);
             const projectRoot = join(__dirname, '../../../../blockchain');
-            const artifact = JSON.parse(readFileSync(join(projectRoot, tokenABIPath), 'utf8'));
-            tokenABI = artifact.abi;
+            const tokenArtifact = JSON.parse(readFileSync(join(projectRoot, tokenABIPath), 'utf8'));
+            const relayerArtifact = JSON.parse(readFileSync(join(projectRoot, relayerABIPath), 'utf8'));
+            const forwarderArtifact = JSON.parse(readFileSync(join(projectRoot, forwarderABIPath), 'utf8'));
+            tokenABI = tokenArtifact.abi;
+            relayerABI = relayerArtifact.abi
+            forwarderABI = forwarderArtifact.abi
+
         } catch (error) {
             console.error("ABI loading error:", error);
             return createErrorResponse("BLOCKCHAIN_ERROR", "Failed to load token ABI", 500);
@@ -116,28 +129,26 @@ export const POST: APIRoute = async ({ request }) => {
             return createErrorResponse("BLOCKCHAIN_ERROR", "Failed to connect to Ethereum node", 500);
         }
 
-        // Create contract instance
-        const tokenContractUser = new ethers.Contract(
-            tokenAddress,
-            tokenABI,
-            userWallet
-        );
+        const forwarderContract = new ethers.Contract(
+            forwarderAddress,
+            forwarderABI,
+            provider
+        )
 
-        const tokenContractAdmin = new ethers.Contract(
-            tokenAddress,
-            tokenABI,
+        const relayerContract = new ethers.Contract(
+            relayerAddress,
+            relayerABI,
             adminWallet
         )
 
-        const sendTx = await adminWallet.sendTransaction({
-            to: await userWallet.getAddress(),
-            value: ethers.parseEther("0.1")
-        })
-
-        await sendTx.wait()
+        const tokenContract = new ethers.Contract(
+            tokenAddress,
+            tokenABI,
+            userWallet
+        )
 
         // Check current balance
-        const balance = await tokenContractAdmin.balanceOf(address);
+        const balance = await tokenContract.balanceOf(await userWallet.getAddress());
         const tierCost = tier === 1 ? 
             ethers.parseEther("100") : // 100 MST for Tier 1
             ethers.parseEther("500");  // 500 MST for Tier 2
@@ -150,22 +161,39 @@ export const POST: APIRoute = async ({ request }) => {
             );
         }
         else{
-            await tokenContractUser.approve(
-                await adminWallet.getAddress(),
-                tierCost
-            )
+            const { success, error } = await createGaslessApproval({
+                signer: userWallet,
+                tokenContract: tokenContract,
+                forwarder: forwarderContract,
+                relayer: relayerContract,
+                spender: await tokenContract.getAddress(),
+                amount: tierCost
+                })
+        
+                if(!success){
+                return createErrorResponse("BLOCKCHAIN_ERROR", "Error in gasless approval" + error?.message, 501)
+                }
         }
 
-        // Execute subscription transaction
+        const metaTx = await createMetaTxRequest(
+            userWallet,
+            forwarderAddress,
+            forwarderABI,
+            tokenAddress,
+            tokenABI,
+            "subscribe",
+            [tier]
+        )
+
         try {
-            const tx = await tokenContractAdmin.subscribe(address, tier);
+            const tx = await relayerContract.relaySubscribe(metaTx);
             const receipt = await tx.wait();
  
             if(receipt.status !== 1){
                 return createErrorResponse("BLOCKCHAIN_ERROR", "Subscription Failed", 500)
             }
 
-            const subscriptionData = await tokenContractAdmin.subscriptions(await userWallet.getAddress())
+            const subscriptionData = await tokenContract.subscriptions(await userWallet.getAddress())
             
             console.log(Number(subscriptionData[0]))
 
@@ -184,7 +212,7 @@ export const POST: APIRoute = async ({ request }) => {
             console.error("Subscription transaction error:", error);
             return createErrorResponse(
                 "TRANSACTION_FAILED",
-                `Failed to process subscription: ${error.message}`,
+                `Failed to process subscription: ${(error as Error).message}`,
                 500
             );
         }

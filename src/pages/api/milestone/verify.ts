@@ -148,7 +148,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       const currentHash = hashMilestone(milestoneData);
       console.log(currentHash)
 
-        const isVerified = await milestoneTracker.verifyMilestoneHash(walletAddress, milestoneId, currentHash);
+      const isVerified = await milestoneTracker.verifyMilestoneHash(walletAddress, milestoneId, currentHash);
       
       // Calculate hash from current data to compare
       

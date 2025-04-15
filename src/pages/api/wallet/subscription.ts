@@ -116,8 +116,6 @@ export const POST: APIRoute = async ({ request }) => {
             token_abi,
             provider
         )
-
-        
         
         const subscriptionData = await token_contract.subscriptions(userAddress)
         const tierNames = ['Free', 'Tier1', 'Tier2'];
