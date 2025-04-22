@@ -28,6 +28,11 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
   const [batchVerifying, setBatchVerifying] = useState(false);
   const [batchResults, setBatchResults] = useState<{ total: number, verified: number, failed: number } | null>(null);
 
+  //nft minting price
+    const [nftMintPrice, setNftMintPrice] = useState<string | null>(null);
+    const [nftPriceLoading, setNftPriceLoading] = useState(true);
+    const [nftPriceError, setNftPriceError] = useState<string | null>(null);
+
   // Preview modal state
   const [previewData, setPreviewData] = useState<{
     visible: boolean;
@@ -40,6 +45,31 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
     loading: false,
     error: null
   });
+
+  useEffect(() => {
+      const fetchNftMintPrice = async () => {
+        try {
+          setNftPriceLoading(true);
+          setNftPriceError(null);
+          const response = await fetch("/api/nft/mint-price", {
+            method: "GET",
+            headers: { "Content-Type": "application/json" },
+          });
+    
+          if (!response.ok) throw new Error((await response.json())?.error?.message || "Failed to fetch NFT mint price");
+          const data = await response.json();
+          if (data.success && data.price) setNftMintPrice(data.price);
+          else throw new Error("Invalid price data received");
+        } catch (error) {
+          console.error("Error fetching NFT mint price:", error);
+          setNftPriceError((error as Error).message || "Failed to fetch NFT mint price");
+        } finally {
+          setNftPriceLoading(false);
+        }
+      };
+    
+      fetchNftMintPrice();
+    }, []);
 
   useEffect(() => {
     const checkScreenSize = () => {
@@ -301,7 +331,7 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
         else throw new Error("Invalid fee data received");
       } catch (error) {
         console.error("Error fetching fees:", error);
-        setFeeError(error.message || "Failed to fetch fees");
+        setFeeError((error as Error).message || "Failed to fetch fees");
       } finally {
         setFeeLoading(false);
       }
@@ -581,18 +611,48 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
         backgroundColor: '#1a1a1a'
       });
 
-      const image = canvas.toDataURL('image/png');
-      const link = document.createElement('a');
-      link.download = `milestone-${previewData.milestone.id}.png`;
-      link.href = image;
-      link.click();
+      const blob = await new Promise<Blob>((resolve) => {
+        canvas.toBlob((blob) => {
+          if (blob) {
+            resolve(blob);
+          } else {
+            throw new Error('Failed to create image blob');
+          }
+        }, 'image/png');
+      });
 
+      // Create a file object from the blob
+      const fileName = `milestone-${previewData.milestone.id}.png`;
+      const imageFile = new File([blob], fileName, { type: 'image/png' });
+
+      // Create form data for API request
+      const formData = new FormData();
+      formData.append('image', imageFile);
+      formData.append('milestoneId', previewData.milestone.id);
+      formData.append('userId', userId);
+
+      // Make API request to create NFT
+      const response = await fetch('/api/nft/create', { 
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error?.message || 'Failed to mint NFT');
+      }
+
+      const result = await response.json();
+      
+      // Show success notification
+      alert(`NFT minted successfully! Token ID: ${result.tokenId}...`);
       setPreviewData(prev => ({ ...prev, loading: false, visible: false }));
     } catch (error: any) {
+      console.error('Error minting NFT:', error);
       setPreviewData(prev => ({
         ...prev,
         loading: false,
-        error: error.message || 'Failed to save image'
+        error: error.message || 'Failed to mint NFT'
       }));
     }
   };
@@ -678,6 +738,26 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
 
       {activeTab === 'active' && (
         <>
+          <div className="mb-6">
+            {nftPriceLoading ? (
+              <div className="p-4 bg-[#222] rounded-xl border border-purple-500/20 animate-pulse">
+                <p className="text-gray-400">Loading NFT minting price...</p>
+              </div>
+            ) : nftPriceError ? (
+              <div className="p-4 bg-red-900/30 text-red-400 rounded-xl text-sm border border-red-500/20">
+                Failed to load NFT minting price: {nftPriceError}
+              </div>
+            ) : nftMintPrice && (
+              <div className="p-4 bg-[#222] border border-purple-500/20 rounded-xl">
+                <h3 className="text-white font-medium mb-2">NFT Minting Cost</h3>
+                <div className="flex items-center gap-2">
+                  <span className="text-yellow-400 text-lg font-semibold">{nftMintPrice} MST</span>
+                  <span className="text-gray-400 text-sm">to mint your milestone as an NFT</span>
+                </div>
+                <p className="text-gray-400 text-xs mt-1">This fee covers the blockchain transaction to create your unique digital certificate.</p>
+              </div>
+            )}
+          </div>
           <div className="mb-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
               <label htmlFor="search" className="block text-sm font-medium text-gray-400 mb-1">Search Milestones</label>
@@ -839,7 +919,7 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
                           onClick={() => handleShowPreview(milestone)}
                           className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-sm rounded transition-colors"
                         >
-                          Save
+                          Create NFT
                         </button>
                       )}
                     </div>
@@ -950,7 +1030,7 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
                           onClick={() => handleShowPreview(milestone)}
                           className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-sm rounded transition-colors"
                         >
-                          Save
+                          Create NFT
                         </button>
                       )}
                     </div>
@@ -973,7 +1053,7 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
                   </svg>
                 </button>
 
-                <h3 className="text-xl font-bold text-white mb-4">Preview Certificate</h3>
+                <h3 className="text-xl font-bold text-white mb-4">Preview Image</h3>
                 
                 <div id="certificate-container" className="p-6 bg-[#1a1a1a] rounded-lg">
                   <div className="text-center mb-8">
@@ -996,24 +1076,24 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
                         />
                       </div>
                     )}
-                    <div className="mt-4 bg-[#252525] p-4 rounded-lg">
-                      <p className="text-gray-400 text-sm mb-1">Participants</p>
-                      <p className="text-white">
-                        <>
-                          <span className="font-medium">{participantDetails[previewData.milestone.owner]?.username} </span>
-                          {(previewData.milestone.taggedFriendIds || []).length > 0 && <span className="mx-1">•</span>}
-                          {(previewData.milestone.taggedFriendIds || []).map((uid: string, i: number) => (
-                            <span key={uid}>
-                              {participantDetails[uid]?.username}
-                              {i < previewData.milestone.taggedFriendIds.length - 1 ? ', ' : ''}
-                            </span>
-                          ))}
-                        </>
+                    <div className="mt-4 bg-[#252525] p-4 rounded-lg flex flex-col items-center">
+                      <p className="text-gray-400 text-sm mb-1 text-center">Participants</p>
+                      <p className="text-white text-center">
+                      <>
+                        <span className="font-medium">{participantDetails[previewData.milestone.owner]?.username} </span>
+                        {(previewData.milestone.taggedFriendIds || []).length > 0 && <span className="mx-1">•</span>}
+                        {(previewData.milestone.taggedFriendIds || []).map((uid: string, i: number) => (
+                        <span key={uid}>
+                          {participantDetails[uid]?.username}
+                          {i < previewData.milestone.taggedFriendIds.length - 1 ? ', ' : ''}
+                        </span>
+                        ))}
+                      </>
                       </p>
                     </div>
-                    <div className="mt-6 bg-[#252525] p-4 rounded-lg">
-                      <p className="text-gray-400 text-sm mb-1">date</p>
-                      <p className="text-white">
+                    <div className="mt-6 bg-[#252525] p-4 rounded-lg flex flex-col items-center">
+                      <p className="text-gray-400 text-sm mb-1 text-center">date</p>
+                      <p className="text-white text-center">
                         {new Date(previewData.milestone.createdAt).toLocaleString()}
                       </p>
                     </div>
@@ -1038,7 +1118,7 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
                         Saving...
                       </>
                     ) : (
-                      'Save Image'
+                      'Create NFT'
                     )}
                   </button>
                 </div>

@@ -248,7 +248,7 @@ export function CreateMilestone({ friends }: { friends: Friend[] }) {
               </div>
               <div className="mt-3 pt-3 border-t border-gray-700">
                 <p className="text-white">
-                  CurrentSyCurrent cost:{" "}
+                  Current cost:{" "}
                   <span className="text-purple-400 font-medium">{getApplicableFee() || "0"} MST</span>
                   {taggedFriends.length > 0 && (
                     <span className="text-gray-400 text-xs ml-2">(Group milestone)</span>

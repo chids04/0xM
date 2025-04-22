@@ -36,10 +36,10 @@ export const GET: APIRoute = async ({ url, cookies }) => {
       );
     }
 
+    // Verify the session cookie
+    let decodedCookie;
     try {
-      const decodedCookie = await auth.verifySessionCookie(sessionCookie);
-      // We allow the user to view their own NFTs or others' NFTs
-      // You can restrict this if needed
+      decodedCookie = await auth.verifySessionCookie(sessionCookie);
     } catch (error) {
       return new Response(
         JSON.stringify({ 
@@ -52,6 +52,49 @@ export const GET: APIRoute = async ({ url, cookies }) => {
 
     // Initialize Firebase services
     const db = getFirestore(app);
+
+    // Get user's wallet address
+    let userWalletAddress;
+    try {
+      const walletDoc = await db
+        .collection("users")
+        .doc(userId)
+        .collection("wallet")
+        .doc("wallet_info")
+        .get();
+
+      if (!walletDoc.exists) {
+        return new Response(
+          JSON.stringify({ 
+            success: false, 
+            error: { code: "WALLET_ERROR", message: "User wallet not found" } 
+          }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      userWalletAddress = walletDoc.data()?.publicKey;
+      if (!userWalletAddress) {
+        return new Response(
+          JSON.stringify({ 
+            success: false, 
+            error: { code: "WALLET_ERROR", message: "User wallet address not found" } 
+          }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      
+      console.log(`User wallet address: ${userWalletAddress}`);
+    } catch (error) {
+      console.error("Error retrieving wallet address:", error);
+      return new Response(
+        JSON.stringify({ 
+          success: false,
+          error: { code: "WALLET_ERROR", message: "Failed to retrieve user wallet" } 
+        }),
+        { status: 500, headers: { "Content-Type": "application/json" } }
+      );
+    }
 
     // Load blockchain configuration
     const nftContractAddress = import.meta.env.MILESTONE_NFT_ADDRESS;
@@ -91,61 +134,59 @@ export const GET: APIRoute = async ({ url, cookies }) => {
     );
     const nftContract = new ethers.Contract(nftContractAddress, nft_abi, provider);
 
-    // Query Firestore for the user's milestones with NFTs
-    const userAcceptedRef = db.collection("users").doc(userId).collection("milestones").doc("accepted");
-    const userAcceptedDoc = await userAcceptedRef.get();
+    // Query Firestore for all milestones with NFTs (may include others' milestones)
+    // This approach lets us find NFTs transferred to this user
+    const milestonesWithNFTsQuery = db.collection("milestones")
+      .where("nftOwnedBy", "==", userWalletAddress)
+      .limit(50); // Add a reasonable limit
+      
+    const milestonesWithNFTsSnapshot = await milestonesWithNFTsQuery.get();
     
     let nfts = [];
     
-    if (userAcceptedDoc.exists) {
-      const data = userAcceptedDoc.data();
-      const milestoneRefs = data?.milestoneRefs || [];
-      
-      // Fetch all milestone data
-      const milestonesData = await Promise.all(milestoneRefs.map(async (ref) => {
-        let milestoneRef;
-        if (typeof ref === 'string') {
-          const pathParts = ref.split('/');
-          if (pathParts.length >= 2) {
-            milestoneRef = db.collection(pathParts[0]).doc(pathParts[1]);
-          }
-        } else {
-          milestoneRef = ref;
-        }
+    if (!milestonesWithNFTsSnapshot.empty) {
+      // Process milestones that have NFTs owned by this user
+      const nftPromises = milestonesWithNFTsSnapshot.docs.map(async (doc) => {
+        const milestone = { id: doc.id, ...(doc.data() as { nftTokenId?: string; nftImageUrl?: string; nftMintedAt?: any }) };
         
-        if (milestoneRef) {
-          const doc = await milestoneRef.get();
-          if (doc.exists) {
-            return { id: doc.id, ...doc.data() };
-          }
-        }
-        return null;
-      }));
-      
-      // Filter for milestones with NFTs and get NFT data
-      const nftPromises = milestonesData
-        .filter(m => m && m.nftTokenId)
-        .map(async (milestone) => {
-          try {
-            // Get NFT metadata from smart contract
-            const [milestoneId, imageUrl] = await nftContract.getNFTMetadata(milestone.nftTokenId);
-            
+        // Skip if no tokenId (shouldn't happen with our query, but just in case)
+        if (!milestone.nftTokenId) return null;
+        
+        try {
+          // Get NFT metadata from smart contract
+          const [milestoneId, imageUrl] = await nftContract.getNFTMetadata(milestone.nftTokenId);
+          
+          return {
+            tokenId: milestone.nftTokenId,
+            milestoneId: milestone.id,
+            nftImageUrl: imageUrl,
+            mintedAt: milestone.nftMintedAt ? 
+              new Date(milestone.nftMintedAt.toDate()).toISOString() : 
+              undefined,
+          };
+        } catch (error) {
+          console.error(`Failed to get NFT data for token ${milestone.nftTokenId}:`, error);
+          
+          // Fallback to the image URL in the milestone if available
+          if (milestone.nftImageUrl) {
             return {
               tokenId: milestone.nftTokenId,
               milestoneId: milestone.id,
-              nftImageUrl: imageUrl,
+              nftImageUrl: milestone.nftImageUrl,
               mintedAt: milestone.nftMintedAt ? 
                 new Date(milestone.nftMintedAt.toDate()).toISOString() : 
                 undefined,
             };
-          } catch (error) {
-            console.error(`Failed to get NFT data for token ${milestone.nftTokenId}:`, error);
-            return null;
           }
-        });
+          
+          return null;
+        }
+      });
       
       nfts = (await Promise.all(nftPromises)).filter(nft => nft !== null);
     }
+    
+    console.log(`Found ${nfts.length} NFTs owned by user's wallet ${userWalletAddress}`);
     
     return new Response(
       JSON.stringify({ success: true, nfts }),

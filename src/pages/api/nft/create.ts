@@ -341,6 +341,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       await milestoneRef.update({
         nftTokenId: tokenId,
         nftMintedAt: FieldValue.serverTimestamp(),
+        nftOwnedBy: await userWallet.getAddress()
       });
     } catch (dbError) {
       console.error("Error storing NFT data:", dbError);

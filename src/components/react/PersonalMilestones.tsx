@@ -38,6 +38,10 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
     error: null
   });
 
+  //nft minting price
+  const [nftMintPrice, setNftMintPrice] = useState<string | null>(null);
+  const [nftPriceLoading, setNftPriceLoading] = useState(true);
+  const [nftPriceError, setNftPriceError] = useState<string | null>(null);
   // Check for mobile screen size
   useEffect(() => {
     const checkScreenSize = () => {
@@ -46,6 +50,31 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
     checkScreenSize();
     window.addEventListener('resize', checkScreenSize);
     return () => window.removeEventListener('resize', checkScreenSize);
+  }, []);
+
+  useEffect(() => {
+    const fetchNftMintPrice = async () => {
+      try {
+        setNftPriceLoading(true);
+        setNftPriceError(null);
+        const response = await fetch("/api/nft/mint-price", {
+          method: "GET",
+          headers: { "Content-Type": "application/json" },
+        });
+  
+        if (!response.ok) throw new Error((await response.json())?.error?.message || "Failed to fetch NFT mint price");
+        const data = await response.json();
+        if (data.success && data.price) setNftMintPrice(data.price);
+        else throw new Error("Invalid price data received");
+      } catch (error) {
+        console.error("Error fetching NFT mint price:", error);
+        setNftPriceError((error as Error).message || "Failed to fetch NFT mint price");
+      } finally {
+        setNftPriceLoading(false);
+      }
+    };
+  
+    fetchNftMintPrice();
   }, []);
 
 
@@ -388,7 +417,7 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
       const result = await response.json();
       
       // Show success notification
-      alert(`NFT minted successfully! Transaction: ${result.transactionHash.substring(0, 10)}...`);
+      alert(`NFT minted successfully! Token ID: ${result.tokenId}...`);
       setPreviewData(prev => ({ ...prev, loading: false, visible: false }));
     } catch (error: any) {
       console.error('Error minting NFT:', error);
@@ -441,7 +470,26 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
   return (
     <div className="container mx-auto px-4 py-8">
       <h1 className="text-3xl font-bold text-white mb-6">Your Milestones</h1>
-
+      <div className="mb-6">
+          {nftPriceLoading ? (
+            <div className="p-4 bg-[#222] rounded-xl border border-purple-500/20 animate-pulse">
+              <p className="text-gray-400">Loading NFT minting price...</p>
+            </div>
+          ) : nftPriceError ? (
+            <div className="p-4 bg-red-900/30 text-red-400 rounded-xl text-sm border border-red-500/20">
+              Failed to load NFT minting price: {nftPriceError}
+            </div>
+          ) : nftMintPrice && (
+            <div className="p-4 bg-[#222] border border-purple-500/20 rounded-xl">
+              <h3 className="text-white font-medium mb-2">NFT Minting Cost</h3>
+              <div className="flex items-center gap-2">
+                <span className="text-yellow-400 text-lg font-semibold">{nftMintPrice} MST</span>
+                <span className="text-gray-400 text-sm">to mint your milestone as an NFT</span>
+              </div>
+              <p className="text-gray-400 text-xs mt-1">This fee covers the blockchain transaction to create your unique digital certificate.</p>
+            </div>
+          )}
+        </div> 
       {/* Filter Controls */}
       <div className="mb-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <div>
@@ -585,7 +633,7 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
                     onClick={() => handleShowPreview(milestone)}
                     className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-sm rounded transition-colors"
                   >
-                    Save
+                    Create NFT
                   </button>
                 </div>
               </div>
@@ -607,7 +655,7 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
               </svg>
             </button>
 
-            <h3 className="text-xl font-bold text-white mb-4">Preview Certificate</h3>
+            <h3 className="text-xl font-bold text-white mb-4">Preview NFT</h3>
             
             <div
               id="certificate-container"
@@ -665,7 +713,7 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
                     Saving...
                   </>
                 ) : (
-                  'Save Image'
+                  'Create NFT'
                 )}
               </button>
             </div>
