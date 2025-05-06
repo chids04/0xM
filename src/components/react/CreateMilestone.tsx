@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { MilestoneForm } from "@/components/react/MilestoneForm";
 import { TagFriendDropdown } from "@/components/react/TagFriendDropdown";
+import { app } from "../../firebase/client"
+import { getFirestore, doc, getDoc } from "firebase/firestore";
+import { getDefaultConfig } from "tailwind-merge";
 
 interface Friend {
   uid: string;
@@ -19,7 +22,7 @@ interface FeeData {
 
 const MAX_FRIENDS = 4;
 
-export function CreateMilestone({ friends }: { friends: Friend[] }) {
+export function CreateMilestone({ friends, userId }: { friends: Friend[], userId: any }) {
   const [taggedFriends, setTaggedFriends] = useState<Friend[]>([]);
   const [submitForm, setSubmitForm] = useState<(() => Promise<any>) | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -30,9 +33,42 @@ export function CreateMilestone({ friends }: { friends: Friend[] }) {
   const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [subscription, setSubscription] = useState<any>(null);
+  const [subscriptionLoading, setSubscriptionLoading] = useState(true);
 
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  useEffect(() => {
+    const fetchSubscription = async () => {
+      try {
+        const db = getFirestore(app)
+        const walletRef = doc(db, "users", userId, "wallet", "wallet_info")
+        const walletDoc = await getDoc(walletRef)
+        
+        if(walletDoc.exists()){
+          const walletData = walletDoc.data()
+          const res = await fetch("/api/wallet/subscription", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ address: walletData.publicKey }),
+          });
 
+          if (!res.ok) throw new Error("Failed to fetch user subscription");
+          const data = await res.json();
+          if (data.success && data.subscription) {
+            setSubscription(data.subscription);
+          }
+        }
+        setSubscriptionLoading(true);
+       
+      } catch (err) {
+        setSubscription(null);
+      } finally {
+        setSubscriptionLoading(false);
+      }
+    };
+    fetchSubscription();
+  }, []);
+  
   useEffect(() => {
     const fetchFees = async () => {
       try {
@@ -190,7 +226,19 @@ export function CreateMilestone({ friends }: { friends: Friend[] }) {
 
   const getApplicableFee = () => {
     if (!feeData) return null;
-    return taggedFriends.length > 0 ? feeData.addGroupMilestoneFee : feeData.addMilestoneFee;
+    let baseFee = taggedFriends.length > 0 ? feeData.addGroupMilestoneFee : feeData.addMilestoneFee;
+    if (!baseFee) return null;
+
+    let discountPercent = 0;
+    if (subscription && subscription.tierName === "Tier1" && feeData.tier1DiscountPercent) {
+      discountPercent = feeData.tier1DiscountPercent;
+    } else if (subscription && subscription.tierName === "Tier2" && feeData.tier2DiscountPercent) {
+      discountPercent = feeData.tier2DiscountPercent;
+    }
+    const baseFeeNum = Number(baseFee);
+    if (isNaN(baseFeeNum)) return baseFee;
+    const discountedFee = baseFeeNum * (1 - discountPercent / 100);
+    return discountedFee.toString();
   };
 
   return (

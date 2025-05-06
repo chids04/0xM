@@ -48,10 +48,9 @@ export const POST: APIRoute = async ({ request }) => {
             return createErrorResponse("VALIDATION_ERROR", "Missing user ID", 400);
         }
 
-        const admin_adr = import.meta.env.ADMIN_ADDRESS;
         const token_adr = import.meta.env.MST_TOKEN_ADDRESS;
         const admin_priv = import.meta.env.ADMIN_PRIV_KEY;
-        if (!admin_adr || !token_adr || !admin_priv) {
+        if (!token_adr || !admin_priv) {
             return createErrorResponse("CONFIG_ERROR", "Missing blockchain configuration", 500);
         }
 

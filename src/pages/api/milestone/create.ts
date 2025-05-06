@@ -308,7 +308,6 @@ export const POST: APIRoute = async ({ request, cookies }) => {
         return createErrorResponse("INSUFFICIENT_FUNDS", "Insufficient funds", 400);
       }
       //gasless approval here
-
       const { success, error } = await createGaslessApproval({
         signer: userWallet,
         tokenContract: token_contract,

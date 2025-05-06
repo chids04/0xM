@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 
 import { createMetaTxRequest } from "./helpers/CreateMetaTx";
+import { createGaslessApproval } from "../wallet/helpers/GaslessApproval"
 
 const ENCRYPTION_KEY: string = import.meta.env.ENCRYPTION_KEY;
 if(!ENCRYPTION_KEY){
@@ -215,6 +216,14 @@ export const POST: APIRoute = async ({ request }) => {
                 relayer_abi,
                 adminWallet
             )
+            
+            const forwarderContract = new ethers.Contract(
+                forwarder_adr,
+                forwarder_abi,
+                adminWallet
+            )
+
+            const transferFee = await relayerContract.getTransferFee();
 
             const senderBalance = await token_contract.balanceOf(senderAddress);
             const amountToSend = ethers.parseEther(amount.toString());
@@ -227,13 +236,27 @@ export const POST: APIRoute = async ({ request }) => {
                 );
             }
 
-            //approve fee first
-            const approveTx = await token_contract.approve(
-                relayer_adr,
-                ethers.parseEther("2")
-            )
+            if(senderBalance < amountToSend + transferFee){
+                return createErrorResponse(
+                    "INSUFFICIENT_FUNDS", 
+                    `Insufficient token balance to cover fee. Available: ${ethers.formatEther(senderBalance)} MST, Needed: ${ethers.formatEther(amountToSend + transferFee)} MST`, 
+                    400
+                );
+            }
 
-            await approveTx.wait();
+            const { success, error } = await createGaslessApproval({
+                    signer: userWallet,
+                    tokenContract: token_contract,
+                    forwarder: forwarderContract,
+                    relayer: relayerContract,
+                    spender: await relayerContract.getAddress(),
+                    amount: ethers.parseEther("2")
+                  })
+            
+                  if(!success){
+                    return createErrorResponse("BLOCKCHAIN_ERROR", "Error in gasless approval consult the server admin" + error?.message, 501)
+            }
+
 
             const txRequest = await createMetaTxRequest(
                 userWallet,

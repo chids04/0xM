@@ -21,7 +21,6 @@ export const POST: APIRoute = async ({ request, redirect }) => {
     });
   }
 
-  /* Create user */
   try {
     await auth.createUser({
       email,
