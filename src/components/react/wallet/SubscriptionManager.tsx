@@ -1,10 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ethers } from 'ethers';
-import { getFirestore } from "firebase/firestore";
-import { app } from "../../../firebase/client";
-import { doc, getDoc, updateDoc } from "firebase/firestore";
 
 interface SubscriptionManagerProps {
   walletAddress: string;
@@ -14,28 +10,32 @@ interface SubscriptionManagerProps {
 type SubscriptionTier = 'Free' | 'Tier1' | 'Tier2';
 
 interface SubscriptionInfo {
-    tier: SubscriptionTier;
-    writesUsed: number;
-    readsUsed: number;
-    lastReset: Date | null;
-    writeLimit: number | 'Unlimited'; // Add this
-    readLimit: number | 'Unlimited';  // Add this
-  }
+  tier: SubscriptionTier;
+  writesUsed: number;
+  lastReset: Date | null;
+  writeLimit: number | 'Unlimited';
+}
+
+interface FeeDiscounts {
+  tier1DiscountPercent: number;
+  tier2DiscountPercent: number;
+}
 
 export default function SubscriptionManager({ walletAddress, currentUser }: SubscriptionManagerProps) {
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [currentSubscription, setCurrentSubscription] = useState<SubscriptionInfo>({
     tier: 'Free',
     writesUsed: 0,
-    readsUsed: 0,
     lastReset: null,
-    writeLimit: 0,
-    readLimit: 0
+    writeLimit: 0
   });
-  const [status, setStatus] = useState<{message: string, type: 'success' | 'error'} | null>(null);
+  const [feeDiscounts, setFeeDiscounts] = useState<FeeDiscounts>({
+    tier1DiscountPercent: 0,
+    tier2DiscountPercent: 0
+  });
+  const [status, setStatus] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
 
-  // Fetch current subscription status
+  // Fetch subscription info
   useEffect(() => {
     const fetchSubscription = async () => {
       try {
@@ -44,93 +44,115 @@ export default function SubscriptionManager({ walletAddress, currentUser }: Subs
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ address: walletAddress })
         });
-  
-        if (!response.ok) {
-          throw new Error('Failed to fetch subscription details');
-        }
-  
         const data = await response.json();
         if (data.success) {
           setCurrentSubscription({
-            tier: data.subscription.tierName as SubscriptionTier, // Use tierName instead of tier
+            tier: data.subscription.tierName as SubscriptionTier,
             writesUsed: data.subscription.writesUsed,
-            readsUsed: data.subscription.readsUsed,
-            writeLimit: data.subscription.writeLimit, // Add these limits
-            readLimit: data.subscription.readLimit,
+            writeLimit: data.subscription.writeLimit,
             lastReset: data.subscription.lastReset ? new Date(data.subscription.lastReset * 1000) : null
           });
         }
       } catch (error) {
-        console.error('Error fetching subscription:', error);
-        setError('Could not load your subscription details');
+        setStatus({ message: "Could not load your subscription details", type: "error" });
       }
     };
-  
     fetchSubscription();
   }, [walletAddress]);
 
+  // Fetch fee discounts
+  useEffect(() => {
+    const fetchDiscounts = async () => {
+      try {
+        const response = await fetch('/api/milestone/fees', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ feeType: "milestone" })
+        });
+        const data = await response.json();
+        if (data.success && data.fees) {
+          setFeeDiscounts({
+            tier1DiscountPercent: data.fees.tier1DiscountPercent ?? 0,
+            tier2DiscountPercent: data.fees.tier2DiscountPercent ?? 0
+          });
+        }
+      } catch (error) {
+        setStatus({ message: "Could not load fee discounts", type: "error" });
+      }
+    };
+    fetchDiscounts();
+  }, []);
+
   const handleSubscribe = async (tier: 'Tier1' | 'Tier2') => {
     setIsLoading(true);
-    setError(null);
     setStatus(null);
-    
+
     try {
-      // Call your API to handle the subscription
       const response = await fetch('/api/wallet/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           address: walletAddress,
-          tier: tier === 'Tier1' ? 1 : 2, // enum in contract uses 1 for Tier1, 2 for Tier2
+          tier: tier === 'Tier1' ? 1 : 2,
           user: currentUser
         })
       });
 
       const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.error?.message || 'Failed to subscribe');
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error?.message || data.message || 'Failed to subscribe');
       }
 
-      if (data.success) {
-        setStatus({
-          message: `Successfully subscribed to ${tier}!`,
-          type: 'success'
-        });
-        
-        // Update local state with new subscription
+      setStatus({
+        message: `Successfully subscribed to ${tier}!`,
+        type: 'success'
+      });
+
+      // Refetch subscription info to update UI
+      const subRes = await fetch('/api/wallet/subscription', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: walletAddress })
+      });
+      const subData = await subRes.json();
+      if (subData.success) {
         setCurrentSubscription({
-          ...currentSubscription,
-          tier: tier
+          tier: subData.subscription.tierName as SubscriptionTier,
+          writesUsed: subData.subscription.writesUsed,
+          writeLimit: subData.subscription.writeLimit,
+          lastReset: subData.subscription.lastReset ? new Date(subData.subscription.lastReset * 1000) : null
         });
-      } else {
-        throw new Error(data.message || 'Unknown error occurred');
       }
-    } catch (error) {
-      console.error('Subscription error:', error);
+    } catch (error: any) {
       setStatus({
         message: error.message || 'Failed to subscribe',
         type: 'error'
       });
     } finally {
       setIsLoading(false);
-      
-      // Clear status after 5 seconds
-      setTimeout(() => {
-        setStatus(null);
-      }, 5000);
+      setTimeout(() => setStatus(null), 5000);
     }
   };
 
-  // Format benefits based on tier
+  // Format benefits based on tier and discount
   const getTierBenefits = (tier: SubscriptionTier) => {
-    switch(tier) {
+    switch (tier) {
       case 'Free':
-        return ['5 write operations per month', '20 read operations per month', 'No discounts on transaction fees'];
+        return [
+          '5 write operations per month',
+          'No discounts on transaction fees'
+        ];
       case 'Tier1':
-        return ['50 write operations per month', 'Unlimited read operations', '25% discount on transaction fees'];
+        return [
+          '50 write operations per month',
+          `Discount: ${feeDiscounts.tier1DiscountPercent}% on transaction fees`
+        ];
       case 'Tier2':
-        return ['Unlimited write operations', 'Unlimited read operations', '50% discount on transaction fees'];
+        return [
+          'Unlimited write operations',
+          `Discount: ${feeDiscounts.tier2DiscountPercent}% on transaction fees`
+        ];
     }
   };
 
@@ -144,25 +166,28 @@ export default function SubscriptionManager({ walletAddress, currentUser }: Subs
           </CardDescription>
         </CardHeader>
         <CardContent>
-        <div className="space-y-2">
+          <div className="space-y-2">
             <p className="text-sm text-gray-300">
-                <span className="text-gray-400">Write operations:</span> {currentSubscription.writesUsed}
-                {currentSubscription.writeLimit !== 'Unlimited' 
-                ? ` / ${currentSubscription.writeLimit}` 
+              <span className="text-gray-400">Write operations:</span> {currentSubscription.writesUsed}
+              {currentSubscription.writeLimit !== 'Unlimited'
+                ? ` / ${currentSubscription.writeLimit}`
                 : ' (unlimited)'}
             </p>
             <p className="text-sm text-gray-300">
-                <span className="text-gray-400">Read operations:</span> {currentSubscription.readsUsed}
-                {currentSubscription.readLimit !== 'Unlimited' 
-                ? ` / ${currentSubscription.readLimit}` 
-                : ' (unlimited)'}
+              <span className="text-gray-400">Transaction fee discount:</span>{" "}
+              {currentSubscription.tier === "Tier1"
+                ? feeDiscounts.tier1DiscountPercent
+                : currentSubscription.tier === "Tier2"
+                ? feeDiscounts.tier2DiscountPercent
+                : 0
+              }%
             </p>
             {currentSubscription.lastReset && (
-                <p className="text-sm text-gray-300">
-                <span className="text-gray-400">Resets on:</span> {new Date(currentSubscription.lastReset.getTime() + 30*24*60*60*1000).toLocaleDateString()}
-                </p>
+              <p className="text-sm text-gray-300">
+                <span className="text-gray-400">Resets on:</span> {new Date(currentSubscription.lastReset.getTime() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString()}
+              </p>
             )}
-            </div>
+          </div>
         </CardContent>
       </Card>
 
@@ -190,13 +215,13 @@ export default function SubscriptionManager({ walletAddress, currentUser }: Subs
               onClick={() => handleSubscribe('Tier1')}
               disabled={isLoading || currentSubscription.tier === 'Tier1'}
               className={`w-full ${
-                currentSubscription.tier === 'Tier1' 
-                  ? 'bg-green-800/20 text-green-400 cursor-not-allowed' 
+                currentSubscription.tier === 'Tier1'
+                  ? 'bg-green-800/20 text-green-400 cursor-not-allowed'
                   : 'bg-purple-600 hover:bg-purple-700 text-white'
               }`}
             >
-              {currentSubscription.tier === 'Tier1' 
-                ? 'Current Plan' 
+              {currentSubscription.tier === 'Tier1'
+                ? 'Current Plan'
                 : isLoading ? 'Processing...' : 'Subscribe for 100 MST'}
             </Button>
           </CardContent>
@@ -225,13 +250,13 @@ export default function SubscriptionManager({ walletAddress, currentUser }: Subs
               onClick={() => handleSubscribe('Tier2')}
               disabled={isLoading || currentSubscription.tier === 'Tier2'}
               className={`w-full ${
-                currentSubscription.tier === 'Tier2' 
-                  ? 'bg-green-800/20 text-green-400 cursor-not-allowed' 
+                currentSubscription.tier === 'Tier2'
+                  ? 'bg-green-800/20 text-green-400 cursor-not-allowed'
                   : 'bg-purple-600 hover:bg-purple-700 text-white'
               }`}
             >
-              {currentSubscription.tier === 'Tier2' 
-                ? 'Current Plan' 
+              {currentSubscription.tier === 'Tier2'
+                ? 'Current Plan'
                 : isLoading ? 'Processing...' : 'Subscribe for 500 MST'}
             </Button>
           </CardContent>
@@ -240,8 +265,8 @@ export default function SubscriptionManager({ walletAddress, currentUser }: Subs
 
       {status && (
         <div className={`p-3 rounded-md ${
-          status.type === 'success' 
-            ? 'bg-green-900/30 text-green-400' 
+          status.type === 'success'
+            ? 'bg-green-900/30 text-green-400'
             : 'bg-red-900/30 text-red-400'
         }`}>
           {status.message}

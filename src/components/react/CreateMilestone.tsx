@@ -37,6 +37,7 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
   const [subscriptionLoading, setSubscriptionLoading] = useState(true);
 
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   useEffect(() => {
     const fetchSubscription = async () => {
       try {
@@ -105,7 +106,7 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
         clearTimeout(timeoutRef.current);
       }
       if (imagePreview) {
-        URL.revokeObjectURL(imagePreview); // Clean up preview URL
+        URL.revokeObjectURL(imagePreview); // clean up preview url
       }
     };
   }, [imagePreview]);
@@ -158,6 +159,17 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
   const createMilestone = async () => {
     if (isSubmitting) return;
 
+    // block if write limit reached
+    if (
+      subscription &&
+      subscription.writeLimit !== "Unlimited" &&
+      Number(subscription.writesUsed) >= Number(subscription.writeLimit)
+    ) {
+      setStatusMessage("You have reached your monthly milestone creation limit.");
+      setStatusType("error");
+      return;
+    }
+
     if (!submitForm) {
       setStatusMessage("Form is not ready yet.");
       setStatusType("error");
@@ -203,7 +215,7 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
         setImagePreview(null);
       } else {
         const errorData = await res.json().catch(() => null);
-        setStatusMessage(`Error creating milestone: ${errorData.error.message || res.statusText}`);
+        setStatusMessage(`Error creating milestone: ${errorData?.error?.message || res.statusText}`);
         setStatusType("error");
       }
 
@@ -240,6 +252,35 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
     const discountedFee = baseFeeNum * (1 - discountPercent / 100);
     return discountedFee.toString();
   };
+
+  // helper for write limit display
+  const getWriteLimitInfo = () => {
+    if (!subscription) return null;
+    const { writeLimit, writesUsed } = subscription;
+    if (writeLimit === "Unlimited") {
+      return (
+        <span>
+          Write limit: <span className="text-white font-semibold">Unlimited</span>
+        </span>
+      );
+    }
+    const writesRemaining = Math.max(Number(writeLimit) - Number(writesUsed), 0);
+    return (
+      <span>
+        Write limit: <span className="text-white font-semibold">{writeLimit}</span>
+        {" | "}
+        Used: <span className="text-white font-semibold">{writesUsed}</span>
+        {" | "}
+        Remaining: <span className="text-white font-semibold">{writesRemaining}</span>
+      </span>
+    );
+  };
+
+  // check if user is over write limit
+  const isOverWriteLimit =
+    subscription &&
+    subscription.writeLimit !== "Unlimited" &&
+    Number(subscription.writesUsed) >= Number(subscription.writeLimit);
 
   return (
     <div className="container mx-auto py-8">
@@ -302,11 +343,22 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
                     <span className="text-gray-400 text-xs ml-2">(Group milestone)</span>
                   )}
                 </p>
+                {subscription && (
+                  <div className="mt-2 text-sm text-gray-300">
+                    {getWriteLimitInfo()}
+                  </div>
+                )}
               </div>
             </div>
           )
         )}
       </div>
+
+      {isOverWriteLimit && (
+        <div className="mb-4 p-3 bg-red-900/30 text-red-400 rounded-md text-sm">
+          You have reached your monthly milestone creation limit.
+        </div>
+      )}
 
       <MilestoneForm setSubmitForm={setFormSubmitFunction} />
 
@@ -383,7 +435,7 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
         <button
           className="bg-purple-600 text-white py-2 px-6 rounded-md hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
           onClick={createMilestone}
-          disabled={isSubmitting}
+          disabled={isSubmitting || isOverWriteLimit}
         >
           {isSubmitting ? "Creating..." : "Create Milestone"}
         </button>

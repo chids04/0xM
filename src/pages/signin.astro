@@ -8,7 +8,7 @@ import fbLogo from "../assets/login_icons/facebook.png";
 import googleLogo from "../assets/login_icons/google.png";
 import appleLogo from "../assets/login_icons/apple.png";
 
-//this for auto sign in, if there is still a valid session in the browser, should add option for this
+//this for auto sign in, if there is still a valid session in the browser,
 const auth = getAuth(app);
 const sessionCookie = Astro.cookies.get("__session")?.value;
 
@@ -18,7 +18,6 @@ if(sessionCookie){
     return Astro.redirect("/profile");
   }
   catch (error) {
-    // If verification fails, allow the page to render.
   }
 }
 ---
@@ -31,6 +30,10 @@ if(sessionCookie){
 
         <p class="text-center text-gray-300">
         or <a href="/register" class="text-gray-500 hover:underline">register here</a>
+        </p>
+
+        <p class="text-center text-gray-300 mt-2">
+          <a href="/forgot-password" class="text-gray-500 hover:underline">Forgot your password?</a>
         </p>
 
         <ProfileForm client:visible/>

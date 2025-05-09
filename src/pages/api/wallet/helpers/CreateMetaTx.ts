@@ -1,15 +1,15 @@
 import { ethers } from "ethers";
 
 /**
- * Creates a meta-transaction request that can be sent to the relayer
- * @param signer - The ethers signer (from MetaMask/browser wallet)
- * @param forwarderAddress - Address of the ERC2771Forwarder contract
+ * creates a meta-transaction request that can be sent to the relayer
+ * @param signer - 
+ * @param forwarderAddress - address of the ERC2771Forwarder contract
  * @param forwarderAbi - ABI of the forwarder contract
- * @param targetAddress - Address of the contract to call (e.g., token contract)
+ * @param targetAddress - address of the contract to call (e.g., token contract)
  * @param targetAbi - ABI of the target contract
- * @param functionName - Name of the function to call
- * @param args - Arguments for the function
- * @returns The request object ready to send to the relayer
+ * @param functionName - name of the function to call
+ * @param args - arguments for the function
+ * @returns the request object ready to send to the relayer
  */
 export async function createMetaTxRequest(
     signer: ethers.Signer,
@@ -25,9 +25,11 @@ export async function createMetaTxRequest(
     const forwarder = new ethers.Contract(forwarderAddress, forwarderAbi, provider);
     const target = new ethers.Contract(targetAddress, targetAbi, provider);
     
+    
     // Encode function data
     const data = target.interface.encodeFunctionData(functionName, args);
     const userAddress = await signer.getAddress();
+    
     
     // Get domain data for EIP-712 signing
     const { name, version, chainId, verifyingContract } = await forwarder.eip712Domain();
