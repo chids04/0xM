@@ -38,33 +38,25 @@ export const POST: APIRoute = async ({ request, cookies }) => {
   }
 
   let targetUserRecord;
-  console.log(targetEmail)
 
   try{
     targetUserRecord = await auth.getUserByEmail(targetEmail);
   }
   catch(error){
     return new Response(
-      JSON.stringify({ message: "User not found" }),
+      JSON.stringify({ message: "User not found in firebase" }),
       { status: 404, headers: { "Content-Type": "application/json" } }
     );
   }
+  console.log(targetUserRecord)
 
   const targetUserId = targetUserRecord.uid
+  console.log("target UID:", targetUserId == "d1WLghysvZ0vdLxJc7tGx6BJmmm3");
 
   if (senderUid === targetUserId) {
     return new Response(
       JSON.stringify({ message: "Cannot add yourself as a friend" }),
       { status: 400, headers: { "Content-Type": "application/json" } }
-    );
-  }
-
-  // check if a user document exists for the target UID in the users collection
-  const targetUserDoc = await db.collection("users").doc(targetUserId).get();
-  if (!targetUserDoc.exists) {
-    return new Response(
-      JSON.stringify({ message: "User not found in firebase" }),
-      { status: 404, headers: { "Content-Type": "application/json" } }
     );
   }
 

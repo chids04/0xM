@@ -2,17 +2,17 @@ import type { APIRoute } from "astro";
 import { app } from "../../../firebase/server";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { getAuth } from "firebase-admin/auth";
-import { getStorage } from "firebase-admin/storage";
 import { ethers } from "ethers";
 import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
-import { readFileSync } from "fs";
-import { join } from "path";
-import { fileURLToPath } from "url";
-import { dirname } from "path";
+import { create as createIpfsClient } from "ipfs-http-client";
+import { relayerContract, adminWallet, tokenContract, 
+  trackerContract, forwarderContract  } from "@/utils/contracts"
+import { createErrorResponse } from "@/utils/ErrorResponse";
+import { CID } from "ipfs-http-client"; // Import CID class
 
-import { createMetaTxRequest } from "../wallet/helpers/CreateMetaTx";
-import { createGaslessApproval } from "../wallet/helpers/GaslessApproval"
+const ipfs = createIpfsClient({ url: "http://127.0.0.1:5001" });
+
 
 const ENCRYPTION_KEY: string = import.meta.env.ENCRYPTION_KEY;
 if (!ENCRYPTION_KEY) {
@@ -20,7 +20,7 @@ if (!ENCRYPTION_KEY) {
 }
 
 function hashMilestone(data: any) {
-  // Only include fields that are hashed
+  // Only include fields that are hashd
   const hashableData = {
     id: data.id,
     description: data.description,
@@ -34,121 +34,16 @@ function hashMilestone(data: any) {
   return crypto.createHash("sha256").update(JSON.stringify(hashableData)).digest("hex");
 }
 
-function decryptPrivateKey(encryptedData: string): string {
-  const [iv, encrypted] = encryptedData.split(":");
-  const key = Buffer.from(ENCRYPTION_KEY, "hex");
-  if (key.length !== 32) {
-    throw new Error("Encryption key must be 32 bytes.");
-  }
-  const ivBuffer = Buffer.from(iv, "hex");
-  if (ivBuffer.length !== 16) {
-    throw new Error("IV must be 16 bytes.");
-  }
-  const decipher = crypto.createDecipheriv("aes-256-cbc", key, ivBuffer);
-  let decrypted = decipher.update(encrypted, "hex", "utf8");
-  decrypted += decipher.final("utf8");
-  return decrypted;
-}
 
-function createErrorResponse(code: string, message: string, status: number) {
-  console.error(`${code}: ${message}`);
-  return new Response(
-    JSON.stringify({
-      success: false,
-      error: { code, message },
-    }),
-    {
-      status,
-      headers: { "Content-Type": "application/json" },
-    }
-  );
-}
 
 export const POST: APIRoute = async ({ request, cookies }) => {
-  let uploadedFile: string | null = null; // Track uploaded file for cleanup
-  let storage
+  let metadataCid: string | null = null;
+  let imageCid: string | null = null;
+
   try {
     // Parse multipart form data
-    const formData = await request.formData();
-
-    // Extract form fields
-    const description = formData.get("description")?.toString();
-    const milestone_date = formData.get("milestone_date")?.toString();
-    const fee = formData.get("fee")?.toString();
-    const taggedFriendIdsRaw = formData.get("taggedFriendIds")?.toString();
-    const taggedFriendIds = taggedFriendIdsRaw ? JSON.parse(taggedFriendIdsRaw) : [];
-    const imageFile = formData.get("image");
-
-    // Validate required fields
-    if (!description || !milestone_date) {
-      return createErrorResponse("VALIDATION_ERROR", "Missing required fields.", 400);
-    }
-
-    // Load blockchain configuration
-    const tracker_adr = import.meta.env.MILESTONE_TRACKER_ADDRESS;
-    const token_adr = import.meta.env.MST_TOKEN_ADDRESS;
-    const relayer_adr = import.meta.env.MILESTONE_RELAYER_ADDRESS;
-    const forwarder_adr = import.meta.env.FORWARDER_ADDRESS;
-
-    if (!tracker_adr || !relayer_adr || !forwarder_adr || !token_adr) {
-      return createErrorResponse(
-        "CONFIG_ERROR",
-        "Missing tracker, token, forwarder or relayer address, SERVER ERROR",
-        500
-      );
-    }
-
-    const ADMIN_PRIV = import.meta.env.ADMIN_PRIV_KEY;
-    if (!ADMIN_PRIV) {
-      return createErrorResponse(
-        "SERVER_ERROR",
-        "Admin unavailable to sign transaction, try again later",
-        500
-      );
-    }
-
-    const trackerABI = import.meta.env.MILESTONE_TRACKER_ABI;
-    const relayerABI = import.meta.env.MILESTONE_RELAYER_ABI;
-    const tokenABI = import.meta.env.MST_TOKEN_ABI;
-    const forwarderABI = import.meta.env.FORWARDER_ABI;
-    let tracker_abi, relayer_abi, forwarder_abi, token_abi;
-
-    if (!trackerABI || !relayerABI || !forwarderABI || !tokenABI) {
-      return createErrorResponse(
-        "CONFIG_ERROR",
-        "Missing tracker, token, forwarder or relayer ABI, SERVER ERROR",
-        500
-      );
-    }
-
-    try {
-      const __filename = fileURLToPath(import.meta.url);
-      const __dirname = dirname(__filename);
-      const projectRoot = join(__dirname, "../../../../blockchain");
-      const trackerArtifact = JSON.parse(readFileSync(join(projectRoot, trackerABI), "utf8"));
-      const relayerArtifact = JSON.parse(readFileSync(join(projectRoot, relayerABI), "utf8"));
-      const forwarderArtifact = JSON.parse(readFileSync(join(projectRoot, forwarderABI), "utf8"));
-      const tokenArtifact = JSON.parse(readFileSync(join(projectRoot, tokenABI), "utf8"));
-      tracker_abi = trackerArtifact.abi;
-      relayer_abi = relayerArtifact.abi;
-      forwarder_abi = forwarderArtifact.abi;
-      token_abi = tokenArtifact.abi;
-    } catch (error) {
-      console.error("ABI loading error:", error);
-      return createErrorResponse(
-        "BLOCKCHAIN_ERROR",
-        "Failed to load tracker, token, relayer or forwarder ABI",
-        500
-      );
-    }
-
-    const provider = new ethers.JsonRpcProvider(
-      import.meta.env.ETHEREUM_RPC_URL || "http://localhost:8545"
-    );
-
     const auth = getAuth(app);
     const db = getFirestore(app);
-    storage = getStorage(app);
 
     // Authenticate user
     const sessionCookie = cookies.get("__session")?.value;
@@ -165,84 +60,72 @@ export const POST: APIRoute = async ({ request, cookies }) => {
 
     const uid = decodedCookie.uid;
 
-    const milestoneId = uuidv4();
-    let imageUrl = "";
+    // extract form fields
+    const formData = await request.formData();
 
-    // Upload image to Firebase Storage if provided
-    if (imageFile instanceof File) {
-      // Validate file type
-      if (!imageFile.type.startsWith("image/")) {
-        return createErrorResponse("VALIDATION_ERROR", "Invalid file type. Only images are allowed.", 400);
-      }
-      // Validate file size (5MB limit)
-      if (imageFile.size > 5 * 1024 * 1024) {
-        return createErrorResponse("VALIDATION_ERROR", "File size exceeds 5MB limit.", 400);
-      }
+    const description = formData.get("description")?.toString();
+    const milestone_date = formData.get("milestone_date")?.toString();
+    const fee = formData.get("fee")?.toString();
+    const taggedFriendIdsRaw = formData.get("taggedFriendIds")?.toString();
+    const taggedFriendIds = taggedFriendIdsRaw ? JSON.parse(taggedFriendIdsRaw) : [];
+    const imageFile = formData.get("image");
+    const walletAddress = formData.get("walletAddress")?.toString();
 
-      const bucket = storage.bucket("nft-images");
-      const fileName = `milestones/${milestoneId}/${imageFile.name || "image"}`;
-      const file = bucket.file(fileName);
-      uploadedFile = fileName; // Track for cleanup
-
-      // Read file buffer
-      const arrayBuffer = await imageFile.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-
-      // Upload to Firebase Storage
-      await file.save(buffer, {
-        metadata: {
-          contentType: imageFile.type,
-        },
-      });
-
-      // Get signed URL
-      const [url] = await file.getSignedUrl({
-        action: "read",
-        expires: "03-01-2500", // Long expiration
-      });
-      imageUrl = url;
+    // Validate required fields
+    if (!description || !milestone_date || !walletAddress) {
+      return createErrorResponse("VALIDATION_ERROR", "Missing required fields.", 400);
     }
 
-    // Prepare milestone data for hashing
-    const milestoneDataForHash = {
-      id: milestoneId,
-      description,
-      milestone_date,
-      image: imageUrl, // Include image URL in hash
-      owner: uid,
-      participants: [] as string[],
-      taggedFriendIds: taggedFriendIds || [],
-      isPending: taggedFriendIds?.length > 0,
-      createdAt: new Date().toISOString(),
-      hash: "",
-    };
+    //ensure user has balance
+    const bal = await tokenContract.balanceOf(walletAddress);
 
-    // Get encrypted private key from Firebase
-    let encryptedPrivKey;
-    const walletDoc = await db
-      .collection("users")
-      .doc(uid)
-      .collection("wallet")
-      .doc("wallet_info")
-      .get();
+    const [
+      addMilestoneFee,
+      addGroupMilestoneFee,
+      signMilestoneFee,
+      tier1DiscountPercent,
+      tier2DiscountPercent,
+    ] = await relayerContract.getMilestoneFees();
 
-    if (walletDoc.exists) {
-      const walletData = walletDoc.data();
-      encryptedPrivKey = walletData?.encryptedPrivateKey;
-    } else {
-      // Cleanup image if wallet is missing
-      if (uploadedFile) {
-        await storage.bucket().file(uploadedFile).delete().catch((err) => {
-          console.error("Failed to clean up image:", err);
-        });
-      }
-      return createErrorResponse("WALLET_ERROR", "User wallet not found.", 400);
-    }
-
-    // Populate participants with public keys for group milestones
     let isGroupMs = false;
     if (taggedFriendIds && taggedFriendIds.length > 0) {
       isGroupMs = true;
+    }
+
+    if(isGroupMs){
+      if(bal < addGroupMilestoneFee){
+        return createErrorResponse("INSUFFICIENT_FUNDS", "Insufficient funds", 400);
+      }
+    } else {
+      if(bal < addMilestoneFee){
+        return createErrorResponse("INSUFFICIENT_FUNDS", "Insufficient funds", 400);
+      }
+    }
+
+
+    const milestoneId = uuidv4();
+
+    
+
+    console.log("hello")
+
+    // prep milestone data for hashing
+    
+    let milestoneDataForHash = {
+      id: milestoneId,
+      description,
+      milestone_date,
+      image: "",  
+      owner: walletAddress,
+      participants: [] as string[],
+      createdAt: new Date().toISOString(),
+    };
+
+
+    
+
+    //get address of friends
+    if (isGroupMs) {
       for (const friendId of taggedFriendIds) {
         const walletRef = db
           .collection("users")
@@ -254,228 +137,326 @@ export const POST: APIRoute = async ({ request, cookies }) => {
         const email = friendUser.email;
         if (friendWalletDoc.exists) {
           const friendWalletData = friendWalletDoc.data();
-          const friendPublicKey = friendWalletData?.publicKey;
+          const friendPublicKey = friendWalletData?.address;
           if (friendPublicKey) {
             milestoneDataForHash.participants.push(friendPublicKey);
           }
         } else {
-          // Cleanup image if friend wallet is missing
-          if (uploadedFile) {
-            storage.bucket().file(uploadedFile).delete().catch((err) => {
-              console.error("Failed to clean up image:", err);
-            });
-          }
           return createErrorResponse(
             "WALLET_ERROR",
-            `${email} is missing a private/public key. Tell them to generate one in settings.`,
+            `${email} is missing a wallet address, tell them to link one.`,
             500
           );
         }
       }
     }
 
-    // Calculate hash with image URL
+    if (imageFile instanceof File) {
+      //validate image type
+      if (!imageFile.type.startsWith("image/")) {
+        return createErrorResponse("VALIDATION_ERROR", "Invalid file type. Only images are allowed.", 400);
+      }
+      // Validate file size (5MB limit)
+      if (imageFile.size > 5 * 1024 * 1024) {
+        return createErrorResponse("VALIDATION_ERROR", "File size exceeds 5MB limit.", 400);
+      }
+
+      // save image to ipfs
+      const arrayBuffer = await imageFile.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      const imgResult = await ipfs.add(buffer);
+      imageCid = imgResult.cid.toString();
+      milestoneDataForHash.image = imageCid;
+
+    }
+ 
+    // calc hash with image URL
     const milestoneHash = hashMilestone(milestoneDataForHash);
-    milestoneDataForHash.hash = milestoneHash;
+    const milestoneData = { ...milestoneDataForHash, hash: milestoneHash, isPending: isGroupMs, taggedFriendIds };
 
-    const adminWallet = new ethers.Wallet(ADMIN_PRIV, provider);
-    const userWallet = new ethers.Wallet(decryptPrivateKey(encryptedPrivKey), provider);
+    const metaBuffer = Buffer.from(JSON.stringify(milestoneDataForHash));
+    const { cid } = await ipfs.add(metaBuffer);
+    metadataCid = cid.toString(); 
 
-    // Check if user has balance for this transaction
-    const token_contract = new ethers.Contract(token_adr, token_abi, provider);
-    const relayerContract = new ethers.Contract(relayer_adr, relayer_abi, adminWallet);
-    const forwarderContract = new ethers.Contract(forwarder_adr, forwarder_abi, provider)
-
-
-    const bal = await token_contract.balanceOf(await userWallet.getAddress());
-    const [
-      addMilestoneFee,
-      addGroupMilestoneFee,
-      signMilestoneFee,
-      tier1DiscountPercent,
-      tier2DiscountPercent,
-    ] = await relayerContract.getMilestoneFees();
+    let callData;
+    let gasEstimate;
 
 
-    if (isGroupMs) {
-      if (addGroupMilestoneFee > bal) {
-        // Cleanup image on insufficient funds
-        if (uploadedFile) {
-          await storage.bucket().file(uploadedFile).delete().catch((err) => {
-            console.error("Failed to clean up image:", err);
-          });
-        }
-        return createErrorResponse("INSUFFICIENT_FUNDS", "Insufficient funds", 400);
-      }
-      //gasless approval here
-      const { success, error } = await createGaslessApproval({
-        signer: userWallet,
-        tokenContract: token_contract,
-        forwarder: forwarderContract,
-        relayer: relayerContract,
-        spender: await relayerContract.getAddress(),
-        amount: addGroupMilestoneFee
-      })
+    
 
-      if(!success){
-        return createErrorResponse("BLOCKCHAIN_ERROR", "Error in gasless approval" + error?.message, 501)
-      }
+    if(isGroupMs){
+        callData = trackerContract.interface.encodeFunctionData(
+            "addGroupMilestone",
+            [
+                milestoneDataForHash.description,
+                milestoneDataForHash.participants,
+                milestoneHash,
+                milestoneId
+            ]
+        );
 
+        gasEstimate = await trackerContract.addGroupMilestone.estimateGas(
+            milestoneDataForHash.description,
+            milestoneDataForHash.participants,
+            milestoneHash,
+            milestoneId,
+            { from: await adminWallet.getAddress() }
+        );
+    }
+    else{
+        callData = trackerContract.interface.encodeFunctionData(
+          "addMilestone",
+          [
+            milestoneDataForHash.description,
+            milestoneHash,
+            milestoneId
+          ]
+        );
+
+        gasEstimate = await trackerContract.addMilestone.estimateGas(
+          milestoneDataForHash.description,
+          milestoneHash,
+          milestoneId,
+          { from: await adminWallet.getAddress() }
+      );
       
-    } else {
-      if (addMilestoneFee > bal) {
-        // Cleanup image on insufficient funds
-        if (uploadedFile) {
-          await storage.bucket().file(uploadedFile).delete().catch((err) => {
-            console.error("Failed to clean up image:", err);
-          });
-        }
-        return createErrorResponse("INSUFFICIENT_FUNDS", "Insufficient Funds", 400);
-      }
-
-      const { success, error } = await createGaslessApproval({
-        signer: userWallet,
-        tokenContract: token_contract,
-        forwarder: forwarderContract,
-        relayer: relayerContract,
-        spender: await relayerContract.getAddress(),
-        amount: addMilestoneFee
-      })
-
-      if(!success){
-        return createErrorResponse("BLOCKCHAIN_ERROR", "Error in gasless approval" + error?.message, 501)
-      }
     }
 
-    let query, tx;
-    let isGroup = false;
-    if (!taggedFriendIds || taggedFriendIds.length === 0) {
-      query = await createMetaTxRequest(
-        userWallet,
-        forwarder_adr,
-        forwarder_abi,
-        tracker_adr,
-        tracker_abi,
-        "addMilestone",
-        [milestoneDataForHash.description, milestoneHash, milestoneId]
-      );
-      tx = await relayerContract.relayAddMilestone(query);
-    } else {
-      isGroup = true;
-      query = await createMetaTxRequest(
-        userWallet,
-        forwarder_adr,
-        forwarder_abi,
-        tracker_adr,
-        tracker_abi,
-        "addGroupMilestone",
-        [milestoneDataForHash.description, milestoneDataForHash.participants, milestoneHash, milestoneId]
-      );
-      tx = await relayerContract.relayAddGroupMilestone(query);
-    }
+    console.log("Gas estimate:", gasEstimate.toString());
+    const gasEstimateWithBuffer = (gasEstimate * 15n) / 10n;
 
-    console.log("Waiting for transaction to be mined...");
-    const receipt = await tx.wait();
-    console.log("Transaction confirmed:", receipt);
+    const nonce = await forwarderContract.nonces(walletAddress);
 
-    if (receipt.status !== 1) {
-      // Cleanup image on blockchain failure
-      if (uploadedFile) {
-        await storage.bucket().file(uploadedFile).delete().catch((err) => {
-          console.error("Failed to clean up image:", err);
-        });
-      }
-      return createErrorResponse(
-        "BLOCKCHAIN_TRANSACTION_FAILED",
-        "Blockchain transaction failed. Milestone not created.",
-        500
-      );
-    }
+    const metaTxRequest = {
+        from: walletAddress,
+        to: await trackerContract.getAddress(),
+        value: "0", // No ETH value
+        gas: gasEstimateWithBuffer.toString(), 
+        nonce: nonce.toString(),
+        deadline: (Math.floor(Date.now() / 1000) + 3600).toString(), // 1 hour from now
+        data: callData,
+    };
 
-    let milestoneData = { ...milestoneDataForHash };
-    const milestoneRef = db.collection("milestones").doc(milestoneId);
-    const ownerRef = db.collection("users").doc(uid).collection("milestones");
+    const ipfsCIDs = { metadataCid, imageCid };
 
-    try {
-      if (isGroup) {
-        const milestoneForParticipant = {
-          ...milestoneData,
-          signatureCount: 0,
-        };
-        await milestoneRef.set(milestoneForParticipant);
-        const pendingRef = ownerRef.doc("pending");
-
-        if (!(await pendingRef.get()).exists) {
-          await pendingRef.set({ milestoneRefs: [milestoneRef] });
-        } else {
-          await pendingRef.update({
-            milestoneRefs: FieldValue.arrayUnion(milestoneRef),
-          });
-        }
-
-        for (const friendId of taggedFriendIds) {
-          const friendPendingRef = db
-            .collection("users")
-            .doc(friendId)
-            .collection("milestones")
-            .doc("pending");
-          if (!(await friendPendingRef.get()).exists) {
-            await friendPendingRef.set({ milestoneRefs: [milestoneRef] });
-          } else {
-            await friendPendingRef.update({
-              milestoneRefs: FieldValue.arrayUnion(milestoneRef),
-            });
-          }
-        }
-      } else {
-        await milestoneRef.set(milestoneData);
-        const acceptedRef = ownerRef.doc("accepted");
-
-        if (!(await acceptedRef.get()).exists) {
-          await acceptedRef.set({ milestoneRefs: [milestoneRef] });
-        } else {
-          await acceptedRef.update({
-            milestoneRefs: FieldValue.arrayUnion(milestoneRef),
-          });
-        }
-      }
-    } catch (firestoreError) {
-      // Cleanup image on Firestore failure
-      if (uploadedFile) {
-        await storage.bucket().file(uploadedFile).delete().catch((err) => {
-          console.error("Failed to clean up image:", err);
-        });
-      }
-      throw firestoreError;
-    }
-
-    // Clear uploadedFile since we succeeded
-    uploadedFile = null;
 
     return new Response(
-      JSON.stringify({
-        message: "Milestone created and added to blockchain.",
-        id: milestoneId,
-        transactionHash: receipt.transactionHash,
-        blockchainData: {
-          blockNumber: receipt.blockNumber,
-          gasUsed: receipt.gasUsed.toString(),
-        },
-      }),
-      { status: 200, headers: { "Content-Type": "application/json" } }
+        JSON.stringify({
+            id: milestoneId,
+            metaTxRequest,
+            ipfsCIDs,
+            owner: uid,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
     );
+
+
+    // if (isGroupMs) {
+    //   if (addGroupMilestoneFee > bal) {
+    //     if (uploadedFile) {
+    //       await storage.bucket().file(uploadedFile).delete().catch((err) => {
+    //         console.error("Failed to clean up image:", err);
+    //       });
+    //     }
+    //     return createErrorResponse("INSUFFICIENT_FUNDS", "Insufficient funds", 400);
+    //   }
+    //   //gasless approval here
+    //   const { success, error } = await createGaslessApproval({
+    //     signer: userWallet,
+    //     tokenContract: token_contract,
+    //     forwarder: forwarderContract,
+    //     relayer: relayerContract,
+    //     spender: await relayerContract.getAddress(),
+    //     amount: addGroupMilestoneFee
+    //   })
+
+    //   if(!success){
+    //     return createErrorResponse("BLOCKCHAIN_ERROR", "Error in gasless approval" + error?.message, 501)
+    //   }
+
+      
+    // } else {
+    //   if (addMilestoneFee > bal) {
+    //     // Cleanup image on insufficient funds
+    //     if (uploadedFile) {
+    //       await storage.bucket().file(uploadedFile).delete().catch((err) => {
+    //         console.error("Failed to clean up image:", err);
+    //       });
+    //     }
+    //     return createErrorResponse("INSUFFICIENT_FUNDS", "Insufficient Funds", 400);
+    //   }
+
+    //   const { success, error } = await createGaslessApproval({
+    //     signer: userWallet,
+    //     tokenContract: token_contract,
+    //     forwarder: forwarderContract,
+    //     relayer: relayerContract,
+    //     spender: await relayerContract.getAddress(),
+    //     amount: addMilestoneFee
+    //   })
+
+    //   if(!success){
+    //     return createErrorResponse("BLOCKCHAIN_ERROR", "Error in gasless approval" + error?.message, 501)
+    //   }
+    // }
+
+    // let query, tx;
+    // let isGroup = false;
+
+    // if (!taggedFriendIds || taggedFriendIds.length === 0) {
+    //   query = await createMetaTxRequest(
+    //     userWallet,
+    //     forwarder_adr,
+    //     forwarder_abi,
+    //     tracker_adr,
+    //     tracker_abi,
+    //     "addMilestone",
+    //     [milestoneDataForHash.description, milestoneHash, milestoneId]
+    //   );
+    //   tx = await relayerContract.relayAddMilestone(query);
+    // } else {
+    //   isGroup = true;
+    //   query = await createMetaTxRequest(
+    //     userWallet,
+    //     forwarder_adr,
+    //     forwarder_abi,
+    //     tracker_adr,
+    //     tracker_abi,
+    //     "addGroupMilestone",
+    //     [milestoneDataForHash.description, milestoneDataForHash.participants, milestoneHash, milestoneId]
+    //   );
+    //   tx = await relayerContract.relayAddGroupMilestone(query);
+    // }
+
+    // console.log("Waiting for transaction to be mined...");
+    // const receipt = await tx.wait();
+    // console.log("Transaction confirmed:", receipt);
+
+    // if (receipt.status !== 1) {
+    //   // Cleanup image on blockchain failure
+    //   if (uploadedFile) {
+    //     await storage.bucket().file(uploadedFile).delete().catch((err) => {
+    //       console.error("Failed to clean up image:", err);
+    //     });
+    //   }
+    //   return createErrorResponse(
+    //     "BLOCKCHAIN_TRANSACTION_FAILED",
+    //     "Blockchain transaction failed. Milestone not created.",
+    //     500
+    //   );
+    // }
+
+    // let milestoneData = { ...milestoneDataForHash };
+    // const milestoneRef = db.collection("milestones").doc(milestoneId);
+    // const ownerRef = db.collection("users").doc(uid).collection("milestones");
+
+    // try {
+    //   if (isGroup) {
+    //     const milestoneForParticipant = {
+    //       ...milestoneData,
+    //       signatureCount: 0,
+    //     };
+
+    //     const jsonBuffer = Buffer.from(JSON.stringify(milestoneForParticipant));  
+    //     const { cid: metadataCid } = await  ipfs.add(jsonBuffer);
+
+
+
+    //     await milestoneRef.set(milestoneForParticipant);
+    //     const pendingRef = ownerRef.doc("pending");
+
+    //     if (!(await pendingRef.get()).exists) {
+    //       await pendingRef.set({ milestoneRefs: [milestoneRef] });
+    //     } else {
+    //       await pendingRef.update({
+    //         milestoneRefs: FieldValue.arrayUnion(milestoneRef),
+    //       });
+    //     }
+
+    //     for (const friendId of taggedFriendIds) {
+    //       const friendPendingRef = db
+    //         .collection("users")
+    //         .doc(friendId)
+    //         .collection("milestones")
+    //         .doc("pending");
+    //       if (!(await friendPendingRef.get()).exists) {
+    //         await friendPendingRef.set({ milestoneRefs: [milestoneRef] });
+    //       } else {
+    //         await friendPendingRef.update({
+    //           milestoneRefs: FieldValue.arrayUnion(milestoneRef),
+    //         });
+    //       }
+    //     }
+    //   } else {
+    //     await milestoneRef.set(milestoneData);
+    //     const acceptedRef = ownerRef.doc("accepted");
+
+    //     const jsonBuffer = Buffer.from(JSON.stringify(milestoneData));  
+    //     const { cid: metadataCid } = await  ipfs.add(jsonBuffer);
+
+    //     console.log("IPFS CID:", metadataCid.toString());
+        
+
+    //     if (!(await acceptedRef.get()).exists) {
+    //       await acceptedRef.set({ milestoneRefs: [milestoneRef] });
+    //     } else {
+    //       await acceptedRef.update({
+    //         milestoneRefs: FieldValue.arrayUnion(milestoneRef),
+    //       });
+    //     }
+    //   }
+    // } catch (firestoreError) {
+    //   // Cleanup image on Firestore failure
+    //   if (uploadedFile) {
+    //     await storage.bucket().file(uploadedFile).delete().catch((err) => {
+    //       console.error("Failed to clean up image:", err);
+    //     });
+    //   }
+    //   throw firestoreError;
+    // }
+
+    // // Clear uploadedFile since we succeeded
+    // uploadedFile = null;
+
+    // return new Response(
+    //   JSON.stringify({
+    //     message: "Milestone created and added to blockchain.",
+    //     id: milestoneId,
+    //     transactionHash: receipt.transactionHash,
+    //     blockchainData: {
+    //       blockNumber: receipt.blockNumber,
+    //       gasUsed: receipt.gasUsed.toString(),
+    //     },
+    //   }),
+    //   { status: 200, headers: { "Content-Type": "application/json" } }
+    // );
   } catch (error: any) {
     // Cleanup image on any unhandled error
-    if (uploadedFile) {
-      await storage.bucket().file(uploadedFile).delete().catch((err) => {
-        console.error("Failed to clean up image:", err);
-      });
-    }
-    console.error("Error:", error);
-    return createErrorResponse(
-      "SERVER_ERROR",
-      error.message || "An error occurred while processing the request.",
-      500
-    );
+    const cleanupCid = async (cid: string | null) => {
+      if (!cid) return;
+      try {
+        const cidObj = CID.parse(cid); 
+        await ipfs.pin.rm(cidObj); 
+        console.log(`Removed pin for CID: ${cid}`);
+      } catch (pinError) {
+        console.warn(`Failed to remove pin for CID ${cid}:`, pinError);
+      }
+      try {
+        const cidObj = CID.parse(cid); 
+        await ipfs.block.rm(cidObj); 
+        console.log(`Removed block for CID: ${cid}`);
+      } catch (blockError) {
+        console.warn(`Failed to remove block for CID ${cid}:`, blockError);
+      }
+    };
+
+    
+    await Promise.all([
+      cleanupCid(metadataCid),
+      cleanupCid(imageCid),
+    ]);
+
+    console.error("Error in POST handler:", error);
+    return createErrorResponse("SERVER_ERROR", error.message || "Unexpected error.", 500);
   }
 };

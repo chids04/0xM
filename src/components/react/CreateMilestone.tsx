@@ -3,7 +3,7 @@ import { MilestoneForm } from "@/components/react/MilestoneForm";
 import { TagFriendDropdown } from "@/components/react/TagFriendDropdown";
 import { app } from "../../firebase/client"
 import { getFirestore, doc, getDoc } from "firebase/firestore";
-import { getDefaultConfig } from "tailwind-merge";
+import { ethers } from "ethers";
 
 interface Friend {
   uid: string;
@@ -38,21 +38,44 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
 
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+
+  async function cleanupIpfs(ipfsCIDs: any) {
+    if (ipfsCIDs && (ipfsCIDs.metadataCid || ipfsCIDs.imageCid)) {
+      await fetch("/api/milestone/cleanup-ipfs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          metadataCid: ipfsCIDs.metadataCid || null,
+          imageCid: ipfsCIDs.imageCid || null,
+        }),
+      });
+    }
+  }
+
+  const handleError = useCallback((msg: string, type: "error" | "success" = "error") => {
+    setStatusMessage(msg);
+    setStatusType(type);
+    setIsSubmitting(false);
+    timeoutRef.current = setTimeout(() => {
+      setStatusMessage(null);
+      setStatusType(null);
+    }, 5000);
+  }, []);
+
+
   useEffect(() => {
     const fetchSubscription = async () => {
       try {
         const db = getFirestore(app)
         const walletRef = doc(db, "users", userId, "wallet", "wallet_info")
         const walletDoc = await getDoc(walletRef)
-        
         if(walletDoc.exists()){
           const walletData = walletDoc.data()
           const res = await fetch("/api/wallet/subscription", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ address: walletData.publicKey }),
+            body: JSON.stringify({ address: walletData.address }),
           });
-
           if (!res.ok) throw new Error("Failed to fetch user subscription");
           const data = await res.json();
           if (data.success && data.subscription) {
@@ -60,16 +83,15 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
           }
         }
         setSubscriptionLoading(true);
-       
-      } catch (err) {
+      } catch {
         setSubscription(null);
       } finally {
         setSubscriptionLoading(false);
       }
     };
     fetchSubscription();
-  }, []);
-  
+  }, [userId]);
+
   useEffect(() => {
     const fetchFees = async () => {
       try {
@@ -91,7 +113,6 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
           throw new Error("Invalid fee data received");
         }
       } catch (error) {
-        console.error("Error fetching fees:", error);
         setFeeError((error as Error).message || "Failed to fetch fees");
       } finally {
         setFeeLoading(false);
@@ -102,14 +123,11 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
 
   useEffect(() => {
     return () => {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-      if (imagePreview) {
-        URL.revokeObjectURL(imagePreview); // clean up preview url
-      }
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      if (imagePreview) URL.revokeObjectURL(imagePreview);
     };
   }, [imagePreview]);
+
 
   const handleTagSelect = (friend: Friend) => {
     setTaggedFriends((prev) => {
@@ -128,22 +146,19 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
     const file = event.target.files?.[0];
     if (file) {
       if (!file.type.startsWith("image/")) {
-        setStatusMessage("Please select a valid image file.");
-        setStatusType("error");
+        handleError("Please select a valid image file.");
         setSelectedFile(null);
         setImagePreview(null);
         return;
       }
-      if (file.size > 5 * 1024 * 1024) { // 5MB limit
-        setStatusMessage("Image file size must be less than 5MB.");
-        setStatusType("error");
+      if (file.size > 5 * 1024 * 1024) {
+        handleError("Image file size must be less than 5MB.");
         setSelectedFile(null);
         setImagePreview(null);
         return;
       }
       setSelectedFile(file);
-      const previewUrl = URL.createObjectURL(file);
-      setImagePreview(previewUrl);
+      setImagePreview(URL.createObjectURL(file));
       setStatusMessage(null);
       setStatusType(null);
     } else {
@@ -152,33 +167,27 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
     }
   };
 
-  const setFormSubmitFunction = useCallback((fn: any) => {
-    setSubmitForm(() => fn);
-  }, []);
+  const setFormSubmitFunction = useCallback((fn: any) => setSubmitForm(() => fn), []);
+
 
   const createMilestone = async () => {
     if (isSubmitting) return;
 
-    // block if write limit reached
     if (
       subscription &&
       subscription.writeLimit !== "Unlimited" &&
       Number(subscription.writesUsed) >= Number(subscription.writeLimit)
     ) {
-      setStatusMessage("You have reached your monthly milestone creation limit.");
-      setStatusType("error");
+      handleError("You have reached your monthly milestone creation limit.");
       return;
     }
 
     if (!submitForm) {
-      setStatusMessage("Form is not ready yet.");
-      setStatusType("error");
+      handleError("Form is not ready yet.");
       return;
     }
 
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-    }
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
 
     setIsSubmitting(true);
     setStatusMessage(null);
@@ -188,59 +197,159 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
       const formData = await submitForm();
 
       if (!formData || !formData.description || !formData.milestone_date) {
-        setStatusMessage("Please fill out the milestone details correctly.");
-        setStatusType("error");
+        handleError("Please fill out the milestone details correctly.");
         setIsSubmitting(false);
         return;
       }
 
       const payload = new FormData();
+      if (window.ethereum && window.ethereum.selectedAddress) {
+        payload.append("walletAddress", window.ethereum.selectedAddress);
+      } else {
+        throw new Error("MetaMask wallet address not found");
+      }
       payload.append("description", formData.description);
       payload.append("milestone_date", formData.milestone_date);
       payload.append("taggedFriendIds", JSON.stringify(taggedFriends.map((f) => f.uid)));
       payload.append("fee", getApplicableFee() || "");
-      if (selectedFile) {
-        payload.append("image", selectedFile);
-      }
+      if (selectedFile) payload.append("image", selectedFile);
 
-      const res = await fetch("/api/milestone/create", {
+      const txPayload = await fetch("/api/milestone/create", {
         method: "POST",
         body: payload,
       });
 
-      if (res.ok) {
+      if (!txPayload.ok) {
+        let errorMsg = "Error generating blockchain transaction, please try again.";
+        try {
+          const errorData = await txPayload.json();
+          if (errorData?.error) errorMsg = errorData.error.message;
+        } catch {}
+        throw new Error(errorMsg);
+      }
+
+      const { id, metaTxRequest, ipfsCIDs, owner } = await txPayload.json();
+      const contractInfo = await fetch(`/api/wallet/domain?to=${metaTxRequest.to}`);
+      const { domain, types } = await contractInfo.json();
+
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+      let signature;
+      try {
+        signature = await signer.signTypedData(domain, types, metaTxRequest);
+      } catch {
+        handleError("Signature request was rejected.");
+        cleanupIpfs(ipfsCIDs);
+        return;
+      }
+
+      const tx = { ...metaTxRequest, signature };
+
+      // Payment
+      const payment = await fetch("api/transaction/make-permit-tx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userAddress: window.ethereum.selectedAddress,
+          amount: getApplicableFee(),
+        }),
+      });
+
+      if (!payment.ok) {
+        cleanupIpfs(ipfsCIDs);
+        throw new Error("Failed to create payment transaction, please try again.");
+      }
+
+      const paymentData = await payment.json();
+      const { domain: paymentDomain, types: paymentTypes, message: paymentMessage } = paymentData;
+
+      let paymentSignature;
+      try {
+        paymentSignature = await signer.signTypedData(paymentDomain, paymentTypes, paymentMessage);
+      } catch {
+        handleError("Signature request was rejected.");
+        cleanupIpfs(ipfsCIDs);
+        return;
+      }
+
+      const paymentTx = await fetch("/api/transaction/send-permit-tx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          payload: paymentData,
+          signature: paymentSignature,
+        }),
+      });
+
+      if (!paymentTx.ok) {
+        cleanupIpfs(ipfsCIDs);
+        const errorData = await paymentTx.json();
+        throw new Error(errorData?.error?.message || "Failed to send payment transaction");
+      }
+
+      const paymentTxData = await paymentTx.json();
+      setStatusMessage(`Payment transaction sent: ${paymentTxData.txHash}`);
+      setStatusType("success");
+
+      // Relay
+      const relayRes = await fetch("/api/milestone/relay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          metaTx: tx,
+          type: taggedFriends.length > 0 ? "group" : "solo",
+          friends: taggedFriends,
+        }),
+      });
+
+      if (!relayRes.ok) {
+        cleanupIpfs(ipfsCIDs);
+        throw new Error("Failed to communicate with the blockchain, please try again later");
+      }
+
+      // Store milestone
+      const store = await fetch("/api/milestone/store", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id,
+          ipfsCIDs,
+          taggedFriends: taggedFriends.map((friend) => ({ uid: friend.uid })),
+          owner,
+        }),
+      });
+
+
+
+
+      if(store.ok){
         setStatusMessage("Milestone created successfully!");
         setStatusType("success");
         setSelectedFile(null);
         setImagePreview(null);
-      } else {
-        const errorData = await res.json().catch(() => null);
-        setStatusMessage(`Error creating milestone: ${errorData?.error?.message || res.statusText}`);
-        setStatusType("error");
       }
+
 
       timeoutRef.current = setTimeout(() => {
         setStatusMessage(null);
         setStatusType(null);
       }, 5000);
     } catch (error) {
-      console.error("Error in form submission:", error);
-      setStatusMessage(`An error occurred: ${error instanceof Error ? error.message : String(error)}`);
-      setStatusType("error");
-      timeoutRef.current = setTimeout(() => {
-        setStatusMessage(null);
-        setStatusType(null);
-      }, 5000);
+      cleanupIpfs((error as any)?.ipfsCIDs);
+      handleError(
+        `An error occurred: ${error instanceof Error ? error.message : String(error)}`
+      );
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  // --- Fee Calculation ---
+
   const getApplicableFee = () => {
     if (!feeData) return null;
     let baseFee = taggedFriends.length > 0 ? feeData.addGroupMilestoneFee : feeData.addMilestoneFee;
     if (!baseFee) return null;
-
     let discountPercent = 0;
     if (subscription && subscription.tierName === "Tier1" && feeData.tier1DiscountPercent) {
       discountPercent = feeData.tier1DiscountPercent;
@@ -253,7 +362,8 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
     return discountedFee.toString();
   };
 
-  // helper for write limit display
+  // --- Write Limit Info ---
+
   const getWriteLimitInfo = () => {
     if (!subscription) return null;
     const { writeLimit, writesUsed } = subscription;
@@ -276,16 +386,16 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
     );
   };
 
-  // check if user is over write limit
   const isOverWriteLimit =
     subscription &&
     subscription.writeLimit !== "Unlimited" &&
     Number(subscription.writesUsed) >= Number(subscription.writeLimit);
 
+  // --- Render ---
+
   return (
     <div className="container mx-auto py-8">
       <h1 className="text-2xl font-bold mb-4 text-white">Create a New Milestone</h1>
-
       {statusMessage && (
         <div
           className={`p-3 rounded-md mb-4 ${
@@ -295,7 +405,6 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
           {statusMessage}
         </div>
       )}
-
       <div className="mb-6">
         {feeLoading ? (
           <div className="p-3 bg-gray-800 rounded-md animate-pulse">
@@ -353,15 +462,12 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
           )
         )}
       </div>
-
       {isOverWriteLimit && (
         <div className="mb-4 p-3 bg-red-900/30 text-red-400 rounded-md text-sm">
           You have reached your monthly milestone creation limit.
         </div>
       )}
-
       <MilestoneForm setSubmitForm={setFormSubmitFunction} />
-
       <div className="mt-6">
         <label htmlFor="image-upload" className="text-white text-lg font-medium">
           Upload Image (Optional)
@@ -385,7 +491,6 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
           </div>
         )}
       </div>
-
       <div className="mt-8">
         <h2 className="text-xl text-white mb-2">
           Tag Friends

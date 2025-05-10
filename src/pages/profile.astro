@@ -106,7 +106,7 @@ if (user) {
 ---
 
 <Layout title="Profile">
-  {userData && <WalletCreationModal client:load userId={userData.uid}/>}
+  {userData && <WalletCreationModal client:load userId={user.uid}/>}
 
   <div class="container mx-auto py-8 px-4 space-y-8">
     {userData ? (
