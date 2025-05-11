@@ -2,14 +2,6 @@ import type { APIRoute } from "astro";
 import {  forwarderContract } from "@/utils/contracts";
 
 export const GET: APIRoute = async ({ url }) => {
-    const to = url.searchParams.get("to");
-    if (!to) {
-        return new Response(
-            JSON.stringify({ error: "Missing 'to' (verifyingContract) parameter" }),
-            { status: 400, headers: { "Content-Type": "application/json" } }
-        );
-    }
-
 
     const { name, version, chainId, verifyingContract } = await forwarderContract.eip712Domain();
     

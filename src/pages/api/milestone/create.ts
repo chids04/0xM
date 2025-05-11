@@ -5,11 +5,10 @@ import { getAuth } from "firebase-admin/auth";
 import { ethers } from "ethers";
 import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
-import { create as createIpfsClient } from "ipfs-http-client";
+import { create as createIpfsClient, CID } from "ipfs-http-client";
 import { relayerContract, adminWallet, tokenContract, 
   trackerContract, forwarderContract  } from "@/utils/contracts"
 import { createErrorResponse } from "@/utils/ErrorResponse";
-import { CID } from "ipfs-http-client"; // Import CID class
 
 const ipfs = createIpfsClient({ url: "http://127.0.0.1:5001" });
 
@@ -28,7 +27,6 @@ function hashMilestone(data: any) {
     image: data.image,
     owner: data.owner,
     participants: data.participants,
-    taggedFriendIds: data.taggedFriendIds,
     createdAt: data.createdAt,
   };
   return crypto.createHash("sha256").update(JSON.stringify(hashableData)).digest("hex");
@@ -41,11 +39,11 @@ export const POST: APIRoute = async ({ request, cookies }) => {
   let imageCid: string | null = null;
 
   try {
-    // Parse multipart form data
+    // pare multipart form data
     const auth = getAuth(app);
     const db = getFirestore(app);
 
-    // Authenticate user
+    // auth user
     const sessionCookie = cookies.get("__session")?.value;
     if (!sessionCookie) {
       return createErrorResponse("AUTH_ERROR", "Unauthorized", 401);
@@ -93,11 +91,11 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     }
 
     if(isGroupMs){
-      if(bal < addGroupMilestoneFee){
+      if(bal < ethers.parseEther(fee ?? addGroupMilestoneFee)){
         return createErrorResponse("INSUFFICIENT_FUNDS", "Insufficient funds", 400);
       }
     } else {
-      if(bal < addMilestoneFee){
+      if(bal < ethers.parseEther(fee ?? addMilestoneFee)){
         return createErrorResponse("INSUFFICIENT_FUNDS", "Insufficient funds", 400);
       }
     }
@@ -166,6 +164,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       const buffer = Buffer.from(arrayBuffer);
       const imgResult = await ipfs.add(buffer);
       imageCid = imgResult.cid.toString();
+      await ipfs.pin.add(imgResult.cid); 
       milestoneDataForHash.image = imageCid;
 
     }
@@ -177,6 +176,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     const metaBuffer = Buffer.from(JSON.stringify(milestoneDataForHash));
     const { cid } = await ipfs.add(metaBuffer);
     metadataCid = cid.toString(); 
+    await ipfs.pin.add(cid); // Pin the metadata CID to IPFS
 
     let callData;
     let gasEstimate;
@@ -238,6 +238,8 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     };
 
     const ipfsCIDs = { metadataCid, imageCid };
+
+    console.log("IPFS CIDs:", ipfsCIDs);
 
 
     return new Response(

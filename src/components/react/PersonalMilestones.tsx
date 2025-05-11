@@ -15,6 +15,10 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
   const [searchTerm, setSearchTerm] = useState('');
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const containerRef = useRef<HTMLDivElement>(null);
+  // Add a ref to store refs for each milestone card
+  const milestoneRefs = useRef<Array<HTMLDivElement | null>>([]);
+  // State to store measured heights
+  const [milestoneHeights, setMilestoneHeights] = useState<number[]>([]);
   const [isMobile, setIsMobile] = useState(false);
   const [currentUsername, setCurrentUsername] = useState<string | null>(null);
   const [firebaseUserInfo, setFirebaseUserInfo] = useState(auth.currentUser);
@@ -112,49 +116,42 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
 
         const acceptedData = acceptedSnapshot.data();
         const milestoneRefs = acceptedData?.milestoneRefs || [];
-        
+
+        // Fetch milestone Firestore docs
         const milestonesDataPromises = milestoneRefs.map(async (ref: any) => {
           try {
-            if (typeof ref === 'string') {
-              const pathParts = ref.split('/');
-              if (pathParts.length >= 2) {
-                const collectionName = pathParts[0];
-                const docId = pathParts[1]; 
-                const milestoneRef = doc(db, collectionName, docId);
-                const milestoneSnapshot = await getDoc(milestoneRef);
-                if (milestoneSnapshot.exists()) {
-                  const data = milestoneSnapshot.data();
-                  return data ? { id: milestoneSnapshot.id, ...data } : null;
-                }
-              }
+            // ref is a DocumentReference
+            const milestoneSnapshot = await getDoc(ref);
+            if (!milestoneSnapshot.exists()) return null;
+            const milestoneDocData = milestoneSnapshot.data();
+            // Only include if owner matches current userId
+            if (!milestoneDocData?.owner || milestoneDocData.owner !== userId) return null;
+            // Get IPFS CID from milestoneDocData
+            const metadataCid = milestoneDocData?.ipfsCIDs?.metadataCid;
+            if (!metadataCid) return null;
+
+            // Fetch milestone data from IPFS
+            const ipfsUrl = `https://ipfs.io/ipfs/${metadataCid}`;
+            const ipfsResponse = await fetch(ipfsUrl);
+            if (!ipfsResponse.ok) {
+              console.error("Failed to fetch milestone data from IPFS:", ipfsUrl);
               return null;
-            } else if (ref?.path) {
-              const milestoneSnapshot = await getDoc(ref);
-              if (milestoneSnapshot.exists()) {
-                const data = milestoneSnapshot.data();
-                return data ? { id: milestoneSnapshot.id, ...data } : null;
-              }
-            } else {
-              console.error("Invalid milestone reference format:", ref);
             }
-            return null;
+            const ipfsData = await ipfsResponse.json();
+
+            // Merge Firestore doc data (for id, owner, etc.) with IPFS data
+            return {
+              id: milestoneSnapshot.id,
+              ...ipfsData,
+              ...milestoneDocData,
+            };
           } catch (error) {
-            console.error("Error fetching individual milestone:", error, ref);
+            console.error("Error fetching milestone from Firestore/IPFS:", error, ref);
             return null;
           }
         });
 
-        const milestonesData = (await Promise.all(milestonesDataPromises))
-          .filter((milestone) => milestone !== null)
-          .filter((milestone: any) => (milestone.participants || []).length === 0)
-          .map((milestone: any, index: number) => ({
-            description: milestone.description,
-            milestone_date: milestone.milestone_date,
-            createdAt: milestone.createdAt,
-            id: milestone.id,
-            image: milestone.image,
-            index,
-          }));
+        const milestonesData = (await Promise.all(milestonesDataPromises)).filter(Boolean);
 
         milestonesData.sort(
           (a: any, b: any) => new Date(a.milestone_date).getTime() - new Date(b.milestone_date).getTime()
@@ -174,6 +171,19 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
     }
   }, [userId]);
 
+  // Measure milestone card heights after render
+  useEffect(() => {
+    if (!filteredMilestones.length) {
+      setMilestoneHeights([]);
+      return;
+    }
+    const heights = filteredMilestones.map((_, idx) => {
+      const el = milestoneRefs.current[idx];
+      return el ? el.offsetHeight : 180; // fallback to 180 if not rendered yet
+    });
+    setMilestoneHeights(heights);
+  }, [filteredMilestones]);
+
   // Update card positions
   useLayoutEffect(() => {
     const updatePositions = () => {
@@ -189,27 +199,29 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
       }
 
       if (window.innerWidth < 768) {
+        // Use measured heights to prevent overlap
+        let currentTop = 0;
+        const gap = 20;
         milestoneElements.forEach((milestone, i) => {
-          const cardHeight = 180;
-          const verticalPos = cardHeight * i + 20 * (i + 1);
-          (milestone as HTMLElement).style.top = `${verticalPos}px`;
+          const height = milestoneHeights[i] || 180;
+          (milestone as HTMLElement).style.top = `${currentTop}px`;
           (milestone as HTMLElement).style.left = '50%';
+          currentTop += height + gap;
         });
       } else {
         const maxAmplitude = containerWidth * 0.3;
         const amplitude = Math.min(maxAmplitude, Math.max(20, (window.innerWidth - 480) / 4));
-        const cardHeight = 180;
-        const totalSpacing = containerHeight - (cardHeight * totalMilestones);
-        const spaceBetweenCards = totalSpacing / (totalMilestones + 5);
-
-        milestoneElements.forEach((milestone) => {
-          const index = parseInt(milestone.getAttribute('data-index') || '0');
-          const verticalPos = spaceBetweenCards * (index + 1) + cardHeight * index + cardHeight / 2;
-          const sinePosition = totalMilestones > 1 ? (index / (totalMilestones - 1)) * Math.PI * 3 : 0;
+        // Use measured heights for vertical positioning
+        let currentTop = 0;
+        const gap = 20;
+        milestoneElements.forEach((milestone, idx) => {
+          const height = milestoneHeights[idx] || 180;
+          const sinePosition = totalMilestones > 1 ? (idx / (totalMilestones - 1)) * Math.PI * 3 : 0;
           const horizontalOffset = Math.sin(sinePosition) * amplitude;
           const horizontalPos = 0.5 + horizontalOffset / containerWidth;
-          (milestone as HTMLElement).style.top = `${verticalPos}px`;
+          (milestone as HTMLElement).style.top = `${currentTop + height / 2}px`;
           (milestone as HTMLElement).style.left = `${horizontalPos * 100}%`;
+          currentTop += height + gap;
         });
       }
     };
@@ -240,7 +252,7 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
       window.removeEventListener('resize', debouncedUpdatePositions);
       window.removeEventListener('pageshow', updatePositions);
     };
-  }, [filteredMilestones]);
+  }, [filteredMilestones, milestoneHeights]);
 
   // Filter milestones
   useEffect(() => {
@@ -261,9 +273,10 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
     setFilteredMilestones(filtered);
   }, [milestones, searchTerm, dateRange]);
 
+  // Adjust containerHeight calculation to use measured heights
   const containerHeight = isMobile
-    ? filteredMilestones.length * 220
-    : filteredMilestones.length * 200 + 200;
+    ? milestoneHeights.reduce((sum, h) => sum + h, 0) + (milestoneHeights.length > 0 ? (milestoneHeights.length - 1) * 20 : 0)
+    : milestoneHeights.reduce((sum, h) => sum + h, 0) + (milestoneHeights.length > 0 ? (milestoneHeights.length - 1) * 20 : 0) + 200;
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearchTerm(e.target.value);
@@ -592,6 +605,8 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
               key={milestone.id}
               className="milestone-card"
               data-index={index}
+              // Attach ref for measuring height
+              ref={el => milestoneRefs.current[index] = el}
             >
               <div
                 className={`bg-[#1a1a1a] p-6 rounded-xl shadow-lg border border-purple-500/20 transition-all duration-300 ${
@@ -600,7 +615,7 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
               >
                 {milestone.image && (
                   <img
-                    src={milestone.image}
+                  src={milestone.image?.startsWith("http") ? milestone.image : `https://ipfs.io/ipfs/${milestone.image}`}
                     alt={milestone.description}
                     className="w-full h-40 object-cover rounded-md mb-4"
                     onError={(e) => {

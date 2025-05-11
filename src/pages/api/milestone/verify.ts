@@ -10,6 +10,8 @@ import { join } from "path";
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 
+import { trackerContract } from "@/utils/contracts";
+
 // Function to hash milestone data for blockchain verification
 function hashMilestone(data: any) {
   // Remove fields that shouldn't be part of the hash calculation
@@ -20,7 +22,6 @@ function hashMilestone(data: any) {
       image: data.image,
       owner: data.owner,
       participants: data.participants,
-      taggedFriendIds: data.taggedFriendIds,
       createdAt: data.createdAt
   };
   
@@ -83,75 +84,86 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       );
     }
 
-    const walletDoc = await db
-      .collection("users")
-      .doc(userId)
-      .collection("wallet")
-      .doc("wallet_info")
-      .get();
+    // Get the user's wallet address from Firestore if not provided in the request
 
-    if (!walletDoc.exists) {
+    const userWalletDoc = await db.collection("users").doc(userId).collection("wallet").doc("wallet_info").get();
+    if (!userWalletDoc.exists) {
       return new Response(
-        JSON.stringify({ 
-        verified: false, 
-        message: "Wallet not found for the user" 
+        JSON.stringify({
+          verified: false,
+          message: "Please connect your wallet to verify the milestone"
+        }),
+        { status: 404, headers: { "Content-Type": "application/json" } }
+      );
+    }
+    const walletAddress = userWalletDoc.data()?.address;
+    if (!walletAddress) {
+      return new Response(
+        JSON.stringify({
+          verified: false,
+          message: "Please connect your wallet to verify the milestone"
         }),
         { status: 404, headers: { "Content-Type": "application/json" } }
       );
     }
 
-    const walletData = walletDoc.data()
-    if(!walletData){
-        return new Response(
-            JSON.stringify({
-                verified: false,
-                message: "Wallet address not found"
-            }),
-            {status: 404, headers: {"Content-Type" : "application/json"}}
-        )
-    }
-    const walletAddress = walletData.publicKey
 
-    console.log(walletAddress)
-
+    // Get the metadataCid from Firestore
     const milestoneData = milestoneDoc.data();
+    const metadataCid = milestoneData?.ipfsCIDs?.metadataCid;
+    if (!metadataCid) {
+      return new Response(
+        JSON.stringify({ 
+          verified: false, 
+          message: "No IPFS metadata CID found for this milestone" 
+        }),
+        { status: 404, headers: { "Content-Type": "application/json" } }
+      );
+    }
 
-    if(!milestoneData){
-        throw new Error("Missing milestone in firebase")
+    const owner = milestoneData?.owner;
+    if (owner !== userId) {
+      return new Response(
+        JSON.stringify({
+          verified: false,
+          message: "You are not the owner of this milestone"
+        }),
+        { status: 404, headers: { "Content-Type": "application/json" } }
+      );
     }
     
-    // Get milestone hash from blockchain
-    // Load contract ABIs
-    const trackerABIPath = import.meta.env.MILESTONE_TRACKER_ABI;
-    const trackerAddress = import.meta.env.MILESTONE_TRACKER_ADDRESS;
-    const rpcUrl = import.meta.env.ETHEREUM_RPC_URL || "http://localhost:8545";
-
-    if(!trackerABIPath || !trackerAddress){
-        throw new Error("Missing tracker ABI path or tracker address")
+    const ipfsUrl = `https://ipfs.io/ipfs/${metadataCid}`;
+    const ipfsResponse = await fetch(ipfsUrl);
+    if (!ipfsResponse.ok) {
+      return new Response(
+        JSON.stringify({ 
+          verified: false, 
+          message: "Failed to fetch milestone data from IPFS" 
+        }),
+        { status: 500, headers: { "Content-Type": "application/json" } }
+      );
     }
 
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = dirname(__filename);
-    const projectRoot = join(__dirname, '../../../../blockchain');
-    const artifact = JSON.parse(readFileSync(join(projectRoot, trackerABIPath), 'utf8'));
-    const trackerABI = artifact.abi
+    const ipfsMilestoneData = await ipfsResponse.json();
+
+    if (
+      !ipfsMilestoneData.owner ||
+      !walletAddress ||
+      ipfsMilestoneData.owner.toLowerCase() !== walletAddress.toLowerCase()
+    ) {
+      return new Response(
+        JSON.stringify({
+          verified: false,
+          message: "Wallet address does not match milestone owner"
+        }),
+        { status: 403, headers: { "Content-Type": "application/json" } }
+      );
+    }
 
     
     try {
-      
-      // Connect to the blockchain
-      const provider = new ethers.JsonRpcProvider(rpcUrl);
-      const milestoneTracker = new ethers.Contract(trackerAddress, trackerABI, provider);
-
-      
-      // Get milestone from blockchain
-      const currentHash = hashMilestone(milestoneData);
-      console.log(currentHash)
-
-      const isVerified = await milestoneTracker.verifyMilestoneHash(walletAddress, milestoneId, currentHash);
-      
-      // Calculate hash from current data to compare
-      
+      const currentHash = hashMilestone(ipfsMilestoneData);
+      const isVerified = await trackerContract.verifyMilestoneHash(walletAddress, milestoneId, currentHash);
       
       return new Response(
         JSON.stringify({
@@ -161,12 +173,13 @@ export const POST: APIRoute = async ({ request, cookies }) => {
         }),
         { status: 200, headers: { "Content-Type": "application/json" } }
       );
+
     } catch (error) {
       console.error("Blockchain error:", error);
       return new Response(
         JSON.stringify({ 
           verified: false, 
-          message: `Blockchain error: ${error.message}` 
+          message: `Blockchain error: ${(error as Error).message}` 
         }),
         { status: 500, headers: { "Content-Type": "application/json" } }
       );
@@ -176,7 +189,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     return new Response(
       JSON.stringify({ 
         verified: false, 
-        message: `Server error: ${error.message}` 
+        message: "Internal server error: please try again later"
       }),
       { status: 500, headers: { "Content-Type": "application/json" } }
     );

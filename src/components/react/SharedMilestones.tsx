@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { app } from '../../firebase/client';
 import { doc, getDoc, getFirestore, writeBatch } from 'firebase/firestore';
 import html2canvas from 'html2canvas-pro';
+import { ethers } from 'ethers';
+import { error } from 'node_modules/astro/dist/core/logger/core';
 
 interface SharedMilestoneTimelineProps {
   userId: string;
@@ -22,6 +24,8 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
   const [feeData, setFeeData] = useState<{ signMilestoneFee?: string } | null>(null);
   const [feeLoading, setFeeLoading] = useState(true);
   const [feeError, setFeeError] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
   
   // Verification states
   const [verificationStatus, setVerificationStatus] = useState<Record<string, { verified: boolean, loading: boolean, error?: string }>>({});
@@ -45,6 +49,15 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
     loading: false,
     error: null
   });
+
+  const setStatus = (msg: string, type: "success" | "error" = "error") => {
+    setStatusMessage(msg);
+    setStatusType(type);
+    setTimeout(() => {
+      setStatusMessage(null);
+      setStatusType(null);
+    }, 5000);
+  };
 
   useEffect(() => {
       const fetchNftMintPrice = async () => {
@@ -87,6 +100,57 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
       setIsLoading(true);
       const db = getFirestore(app);
 
+      // Helper to fetch and join Firestore + IPFS data
+      const fetchMilestoneWithIpfs = async (refPath: any) => {
+        try {
+          let milestoneSnapshot;
+          if (typeof refPath === 'string') {
+            const pathParts = refPath.split('/');
+            if (pathParts.length >= 2) {
+              const milestoneRef = doc(db, pathParts[0], pathParts[1]);
+              milestoneSnapshot = await getDoc(milestoneRef);
+            }
+          } else if (refPath?.path) {
+            milestoneSnapshot = await getDoc(refPath);
+          }
+          if (!milestoneSnapshot?.exists()) return null;
+          const milestoneDocData = milestoneSnapshot.data();
+          const metadataCid = milestoneDocData?.ipfsCIDs?.metadataCid;
+          let ipfsData = {};
+          if (metadataCid) {
+            const ipfsUrl = `https://ipfs.io/ipfs/${metadataCid}`;
+            try {
+              // Timeout promise for 5 seconds
+              const timeoutPromise = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error("IPFS fetch timed out")), 5000)
+              );
+              const ipfsResponse = await Promise.race([
+                fetch(ipfsUrl),
+                timeoutPromise
+              ]);
+              if (ipfsResponse.ok) {
+                ipfsData = await ipfsResponse.json();
+              } else {
+                setStatus("Some milestones may not be available yet, please try again later", "error");
+                return null;
+              }
+            } catch (err) {
+              setStatus("Some milestones may not be available yet, please try again later", "error");
+              console.error("Failed to fetch milestone data from IPFS:", ipfsUrl, err);
+              return null;
+            }
+          }
+          return {
+            id: milestoneSnapshot.id,
+            ...ipfsData,
+            ...milestoneDocData,
+          };
+        } catch (error) {
+          console.error("Error fetching milestone from Firestore/IPFS:", error, refPath);
+          return null;
+        }
+      };
+
       try {
         // Fetch signed milestones
         const signedRef = doc(db, "users", userId, "milestones", "signed");
@@ -96,20 +160,7 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
         if (signedSnapshot.exists()) {
           const signedData = signedSnapshot.data();
           const signedRefs = signedData?.milestoneRefs || [];
-          const signedMilestonesPromises = signedRefs.map(async (refPath: any) => {
-            if (typeof refPath === 'string') {
-              const pathParts = refPath.split('/');
-              if (pathParts.length >= 2) {
-                const milestoneRef = doc(db, pathParts[0], pathParts[1]);
-                const milestoneSnapshot = await getDoc(milestoneRef);
-                return milestoneSnapshot.exists() ? { id: milestoneSnapshot.id, ...milestoneSnapshot.data() } : null;
-              }
-            } else if (refPath?.path) {
-              const milestoneSnapshot = await getDoc(refPath);
-              return milestoneSnapshot.exists() ? { id: milestoneSnapshot.id, ...milestoneSnapshot.data() } : null;
-            }
-            return null;
-          });
+          const signedMilestonesPromises = signedRefs.map(fetchMilestoneWithIpfs);
 
           signedMilestonesData = (await Promise.all(signedMilestonesPromises))
             .filter(milestone => milestone !== null)
@@ -194,20 +245,7 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
         if (acceptedSnapshot.exists()) {
           const acceptedData = acceptedSnapshot.data();
           const milestoneRefs = acceptedData?.milestoneRefs || [];
-          const milestonesDataPromises = milestoneRefs.map(async (refPath: any) => {
-            if (typeof refPath === 'string') {
-              const pathParts = refPath.split('/');
-              if (pathParts.length >= 2) {
-                const milestoneRef = doc(db, pathParts[0], pathParts[1]);
-                const milestoneSnapshot = await getDoc(milestoneRef);
-                return milestoneSnapshot.exists() ? { id: milestoneSnapshot.id, ...milestoneSnapshot.data() } : null;
-              }
-            } else if (refPath?.path) {
-              const milestoneSnapshot = await getDoc(refPath);
-              return milestoneSnapshot.exists() ? { id: milestoneSnapshot.id, ...milestoneSnapshot.data() } : null;
-            }
-            return null;
-          });
+          const milestonesDataPromises = milestoneRefs.map(fetchMilestoneWithIpfs);
 
           sharedMilestones = (await Promise.all(milestonesDataPromises))
             .filter(milestone => milestone !== null)
@@ -228,20 +266,7 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
         if (pendingSnapshot.exists()) {
           const pendingData = pendingSnapshot.data();
           const pendingRefs = pendingData?.milestoneRefs || [];
-          const pendingMilestonesPromises = pendingRefs.map(async (refPath: any) => {
-            if (typeof refPath === 'string') {
-              const pathParts = refPath.split('/');
-              if (pathParts.length >= 2) {
-                const milestoneRef = doc(db, pathParts[0], pathParts[1]);
-                const milestoneSnapshot = await getDoc(milestoneRef);
-                return milestoneSnapshot.exists() ? { id: milestoneSnapshot.id, ...milestoneSnapshot.data() } : null;
-              }
-            } else if (refPath?.path) {
-              const milestoneSnapshot = await getDoc(refPath);
-              return milestoneSnapshot.exists() ? { id: milestoneSnapshot.id, ...milestoneSnapshot.data() } : null;
-            }
-            return null;
-          });
+          const pendingMilestonesPromises = pendingRefs.map(fetchMilestoneWithIpfs);
 
           pendingMilestonesData = (await Promise.all(pendingMilestonesPromises))
             .filter(milestone => milestone !== null)
@@ -254,6 +279,8 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
             }))
             .sort((a, b) => new Date(a.milestone_date).getTime() - new Date(b.milestone_date).getTime());
         }
+
+        console.log("Pending milestones:", pendingMilestonesData);
 
         setPendingMilestones(pendingMilestonesData);
 
@@ -306,6 +333,7 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
         }
       } catch (error) {
         console.error("Error fetching milestones:", error);
+        setStatus("Error fetching milestones. Please try again.", "error");
       } finally {
         setIsLoading(false);
       }
@@ -439,29 +467,133 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
 
     setIsLoading(true);
     try {
-      const response = await fetch('/api/milestone/accept', {
+      if(!feeData){
+        throw new Error("Fee data not available, try again later");
+      }
+
+      const provider = new ethers.BrowserProvider(window.ethereum);
+            const signer = await provider.getSigner();
+
+      const payment = await fetch("api/transaction/make-permit-tx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userAddress: window.ethereum.selectedAddress,
+          amount: feeData.signMilestoneFee,
+        }),
+      });
+
+      if(!payment.ok) {
+        throw new Error("Failed to create payment transaction, please try again later");
+      }
+
+      const paymentData = await payment.json();
+      const { domain: paymentDomain, types: paymentTypes, message: paymentMessage } = paymentData;
+
+      let paymentSignature;
+      try {
+        paymentSignature = await signer.signTypedData(paymentDomain, paymentTypes, paymentMessage);
+      } catch {
+        setStatus("Signature request was rejected.", "error");
+        throw new Error("Signature request was rejected.");
+      }
+
+      const paymentTx = await fetch("/api/transaction/send-permit-tx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          payload: paymentData,
+          signature: paymentSignature,
+        }),
+      });
+
+      if (!paymentTx.ok) {
+        const errorData = await paymentTx.json();
+        throw new Error(errorData?.error?.message || "Failed to send payment transaction, please try again later");
+      }
+
+      const paymentTxData = await paymentTx.json();
+      setStatus(`Succesfully approved payment of ${feeData.signMilestoneFee} MST`, "success");
+
+      const accept = await fetch('/api/milestone/create-accept-tx', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           milestoneId: pendingMilestone.id,
           ownerUid: pendingMilestone.owner || pendingMilestone.proposedBy,
-          participants: pendingMilestone.participants || [],
           fee: feeData?.signMilestoneFee
         }),
       });
 
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.message || 'Failed to accept milestone');
+      if(!accept.ok) {
+        const errorData = await accept.json();
+        throw new Error(errorData?.error?.message || "Failed to create blockchain transaction, please try again later");
+      }
+
+      const { metaTxRequest, domain, types }  = await accept.json();
+
+      let signedTransaction;
+      try {
+        signedTransaction = await signer.signTypedData(domain, types, metaTxRequest);
+      }catch {
+        setStatus("Signature request was rejected.", "error");
+        throw new Error("Signature request was rejected.");
+      }
+
+      const tx = {
+        ...metaTxRequest,
+        signature: signedTransaction,
+      }
+
+
+      const relayRes = await fetch("/api/milestone/relay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          metaTx: tx,
+          type: "sign",
+        }),
+      });
+
+      if (!relayRes.ok) {
+        throw new Error("Failed to send signature to the blockchain, please try again later");
+      }
+
+      const { txHash, blockNum } = await relayRes.json();
+
+      console.log("Transaction hash:", txHash);
+      console.log("Block number:", blockNum);
+      console.log("Milestone ID:", pendingMilestone.id);
+
+      const storeRes = await fetch("/api/milestone/save-signature", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({  
+          milestoneId: pendingMilestone.id,
+          blockNumber: blockNum,
+          hash: txHash
+        }),
+      });
+
+      if (!storeRes.ok) {
+        throw new Error("Failed to store signature, please try again later");
+      }
+      const result = await storeRes.json();
+
+      if (!result.success) {
+        throw new Error("Failed to store signature, please try again later");
+      }
+
 
       setPendingMilestones(prev => prev.filter(item => item.id !== pendingMilestone.id));
       if (result.isFinalized) {
-        const newMilestone = { ...pendingMilestone, isShared: true, isPending: false, transactionHash: result.transactionHash };
+        const newMilestone = { ...pendingMilestone, isPending: false};
         setMilestones(prev => [...prev, newMilestone].sort((a, b) => new Date(a.milestone_date).getTime() - new Date(b.milestone_date).getTime()));
       }
-      alert('Milestone accepted successfully!');
+      setStatus("Milestone accepted successfully!", "success");
     } catch (error: any) {
       console.error("Error accepting milestone:", error);
-      alert(`Failed to accept milestone: ${error.message}`);
+      setStatus(error.message, "error");
     } finally {
       setIsLoading(false);
     }
@@ -475,12 +607,18 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
 
     setIsLoading(true);
     try {
+      const message = `Decline milestone ${pendingMilestone.id} at ${Date.now()}`;
+      const signature = await window.ethereum.request({
+        method: "personal_sign",
+        params: [message, window.ethereum.selectedAddress],
+      });
       const response = await fetch('/api/milestone/decline', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           milestoneId: pendingMilestone.id,
-          ownerUid: pendingMilestone.owner || pendingMilestone.proposedBy,
+          signature,
+          message
         }),
       });
 
@@ -704,6 +842,23 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
   return (
     <div className="container mx-auto px-4 py-8">
       <h1 className="text-3xl font-bold text-white mb-6">Shared Milestones</h1>
+      {statusMessage && (
+        <div
+          className={`p-3 rounded-md mb-4 ${
+            statusType === "success"
+              ? "bg-green-900/30 text-green-400"
+              : "bg-red-900/30 text-red-400"
+          }`}
+        >
+          {statusMessage}
+        </div>
+      )}
+      {isLoading && (
+        <div className="text-center py-8 text-gray-400">
+          <div className="animate-spin w-8 h-8 border-4 border-purple-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+          Loading milestones...
+        </div>
+      )}
 
       <div className="flex border-b border-purple-500/30 mb-6">
         <button
@@ -883,7 +1038,11 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
                     </div>
                     {milestone.image && (
                       <img 
-                        src={milestone.image} 
+                        src={
+                          milestone.image.startsWith('http')
+                            ? milestone.image
+                            : `https://ipfs.io/ipfs/${milestone.image}`
+                        }
                         alt={milestone.description} 
                         className="w-full h-40 object-cover rounded-md mb-2"
                         onError={(e) => { e.currentTarget.style.display = 'none'; }}
@@ -939,7 +1098,11 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
                     </div>
                     {milestone.image && (
                       <img 
-                        src={milestone.image} 
+                        src={
+                          milestone.image.startsWith('http')
+                            ? milestone.image
+                            : `https://ipfs.io/ipfs/${milestone.image}`
+                        }
                         alt={milestone.description} 
                         className="w-full h-40 object-cover rounded-md mb-2"
                         onError={(e) => { e.currentTarget.style.display = 'none'; }}
@@ -993,7 +1156,11 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
                     </div>
                     {milestone.image && (
                       <img 
-                        src={milestone.image} 
+                        src={
+                          milestone.image.startsWith('http')
+                            ? milestone.image
+                            : `https://ipfs.io/ipfs/${milestone.image}`
+                        }
                         alt={milestone.description} 
                         className="w-full h-40 object-cover rounded-md mb-2"
                         onError={(e) => { e.currentTarget.style.display = 'none'; }}
@@ -1066,7 +1233,11 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
                     {previewData.milestone.image && (
                       <div className="mt-4 flex justify-center">
                         <img
-                          src={previewData.milestone.image}
+                          src={
+                            previewData.milestone.image.startsWith('http')
+                              ? previewData.milestone.image
+                              : `https://ipfs.io/ipfs/${previewData.milestone.image}`
+                          }
                           alt="Milestone"
                           className="max-w-full h-auto rounded-lg"
                           style={{ maxHeight: '200px' }}

@@ -38,14 +38,6 @@ export const POST: APIRoute = async ({ request, cookies }) => {
             );
         }
 
-        const balTx = await tokenContract.balanceOf(from);
-        console.log("user balance", ethers.formatEther(balTx));
-        const sub = await tokenContract.subscriptions(from);
-        console.log("Tier:", sub.tier); // 0 = Free, 1 = Tier1, 2 = Tier2
-        console.log("Writes used:", sub.writesUsed.toString());
-        console.log("Reads used:", sub.readsUsed.toString());
-        console.log("Last reset:", sub.lastReset.toString());
-
         let tx;
         console.log(metaTx, type)
         if(type == "solo"){
@@ -53,6 +45,11 @@ export const POST: APIRoute = async ({ request, cookies }) => {
         }
         else if(type == "group"){
             tx = await relayerContract.relayAddGroupMilestone(metaTx)
+        }
+        else if(type == "sign"){
+            tx = await relayerContract.relaySignMilestone(metaTx)
+        } else {
+            return createErrorResponse("INVALID_TYPE", "Invalid transaction type", 400);
         }
 
         const receipt = await tx.wait();
@@ -62,7 +59,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
         }
 
         return new Response(
-            JSON.stringify({ success: true, txHash: receipt.transactionHash }),
+            JSON.stringify({ success: true, txHash: receipt.hash, blockNum: receipt.blockNumber }),
             { status: 200, headers: { "Content-Type": "application/json" } }
         );
         

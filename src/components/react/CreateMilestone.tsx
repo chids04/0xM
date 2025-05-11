@@ -40,6 +40,7 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
 
 
   async function cleanupIpfs(ipfsCIDs: any) {
+    console.log("Cleaning up IPFS CIDs:", ipfsCIDs);
     if (ipfsCIDs && (ipfsCIDs.metadataCid || ipfsCIDs.imageCid)) {
       await fetch("/api/milestone/cleanup-ipfs", {
         method: "POST",

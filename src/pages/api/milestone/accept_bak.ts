@@ -12,6 +12,10 @@ import { dirname } from 'path';
 import { createMetaTxRequest } from "../wallet/helpers/CreateMetaTx";
 import { createGaslessApproval } from "../wallet/helpers/GaslessApproval";
 
+import { createErrorResponse } from "@/utils/ErrorResponse";
+import { trackerContract, tokenContract, relayerContract, forwarderContract } from "@/utils/contracts";
+
+
 const ENCRYPTION_KEY: string = import.meta.env.ENCRYPTION_KEY;
 
 function decryptPrivateKey(encryptedData: string): string {
@@ -33,19 +37,6 @@ function decryptPrivateKey(encryptedData: string): string {
     return decrypted;
   }
 
-function createErrorResponse(code: string, message: string, status: number) {
-  console.error(`${code}: ${message}`);
-  return new Response(
-      JSON.stringify({ 
-        success: false, 
-        error: { code, message } 
-      }),
-      { 
-        status, 
-        headers: { "Content-Type": "application/json" } 
-      }
-  );
-}
 export const POST: APIRoute = async ({ request, cookies }) => {
   try {
     const data = await request.json();

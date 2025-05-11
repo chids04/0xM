@@ -1,159 +1,134 @@
 import type { APIRoute } from "astro";
 import { app } from "../../../firebase/server";
-import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
+import { getFirestore } from "firebase-admin/firestore";
 import { getAuth } from "firebase-admin/auth";
+import { create as createIpfsClient, CID } from "ipfs-http-client";
+import { trackerContract, adminWallet } from "@/utils/contracts";
+import { createErrorResponse } from "@/utils/ErrorResponse";
+import { ethers } from "ethers";
+
+const ipfs = createIpfsClient({ url: "http://127.0.0.1:5001" });
 
 export const POST: APIRoute = async ({ request, cookies }) => {
   try {
-    const data = await request.json();
-    const { milestoneId, ownerUid } = data;
-
-    // Validate input
-    if (!milestoneId || !ownerUid) {
-      return new Response(
-        JSON.stringify({
-          error: "Missing required fields",
-          details: "Request must include milestoneId and ownerUid",
-        }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
+    const { milestoneId, signature, message } = await request.json();
+    if (!milestoneId) {
+      return createErrorResponse("VALIDATION_ERROR", "Missing milestoneId", 400);
     }
 
-    // Set up auth and db
+    // Auth
     const auth = getAuth(app);
-    const db = getFirestore(app);
-
-    // Verify session using the session cookie
     const sessionCookie = cookies.get("__session")?.value;
     if (!sessionCookie) {
-      return new Response(
-        JSON.stringify({ message: "Unauthorized" }),
-        { status: 401, headers: { "Content-Type": "application/json" } }
-      );
+      return createErrorResponse("AUTH_ERROR", "Unauthorized", 401);
     }
-
     let decodedCookie;
     try {
       decodedCookie = await auth.verifySessionCookie(sessionCookie);
-    } catch (error) {
-      return new Response(
-        JSON.stringify({ message: "Invalid session" }),
-        { status: 401, headers: { "Content-Type": "application/json" } }
-      );
+    } catch {
+      return createErrorResponse("AUTH_ERROR", "Invalid session", 401);
     }
 
-    const currentUserUid = decodedCookie.uid;
+    const db = getFirestore(app);
 
-    // Prevent the owner from declining their own milestone
-    if (currentUserUid === ownerUid) {
-      return new Response(
-        JSON.stringify({
-          message: "Owner cannot decline their own milestone",
-          errorCode: "INVALID_ACTION",
-        }),
-        { status: 403, headers: { "Content-Type": "application/json" } }
-      );
+    // Get the user's wallet address from the wallet_info document
+    const walletDoc = await db
+      .collection("users")
+      .doc(decodedCookie.uid)
+      .collection("wallet")
+      .doc("wallet_info")
+      .get();
+    const userWalletAddress = walletDoc.data()?.address || null;
+
+    let recoveredAddress;
+    try {
+      recoveredAddress = ethers.verifyMessage(message, signature);
+    } catch (err) {
+      return createErrorResponse("SIGNATURE_ERROR", "Invalid signature", 400);
+    }
+    if (recoveredAddress.toLowerCase() !== userWalletAddress.toLowerCase()) {
+      return createErrorResponse("SIGNATURE_ERROR", "Signature does not match wallet address", 401);
     }
 
-    // Get milestone data
     const milestoneRef = db.collection("milestones").doc(milestoneId);
     const milestoneDoc = await milestoneRef.get();
-
     if (!milestoneDoc.exists) {
-      return new Response(
-        JSON.stringify({
-          message: "Milestone not found",
-          errorCode: "MILESTONE_NOT_FOUND",
-        }),
-        { status: 404, headers: { "Content-Type": "application/json" } }
-      );
+      return createErrorResponse("NOT_FOUND", "Milestone not found", 404);
     }
-
     const milestoneData = milestoneDoc.data();
-    if (!milestoneData) {
-      return new Response(
-        JSON.stringify({
-          message: "Milestone data is empty",
-          errorCode: "MILESTONE_DATA_EMPTY",
-        }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
-      );
+    const ownerUid = milestoneData?.owner;
+    const ipfsCIDs = milestoneData?.ipfsCIDs || {};
+    const metadataCid = ipfsCIDs.metadataCid || null;
+    const imageCid = ipfsCIDs.imageCid || null;
+
+    if(!milestoneData) {
+      return createErrorResponse("NOT_FOUND", "Milestone data not found", 404);
     }
 
-    // Get taggedFriendIds from milestone data
-    const taggedFriendIds = milestoneData.taggedFriendIds || [];
+    if (milestoneData && !milestoneData.taggedFriendIds.includes(decodedCookie.uid)) {
+      return createErrorResponse("AUTH_ERROR", "Unauthorized to decline milestone", 401);
+    }
 
-    // Create array of all users to update (owner + tagged friends + current user)
-    const usersToUpdate = [...new Set([ownerUid, currentUserUid, ...taggedFriendIds])];
+    // Remove from Firestore
+    await milestoneRef.delete();
 
-    // Update pending and declined milestones for all relevant users
-    for (const userId of usersToUpdate) {
-      const userPendingRef = db
-        .collection("users")
-        .doc(userId)
-        .collection("milestones")
-        .doc("pending");
-      
-      const userDeclinedRef = db
-        .collection("users")
-        .doc(userId)
-        .collection("milestones")
-        .doc("declined");
-
-      // Remove from pending
-      const userPendingDoc = await userPendingRef.get();
-      if (userPendingDoc.exists) {
-        await userPendingRef.update({
-          milestoneRefs: FieldValue.arrayRemove(milestoneRef)
-        });
-      }
-
-      // Add to declined
-      const userDeclinedDoc = await userDeclinedRef.get();
-      if (!userDeclinedDoc.exists) {
-        await userDeclinedRef.set({ milestoneRefs: [milestoneRef] });
-      } else {
-        await userDeclinedRef.update({
-          milestoneRefs: FieldValue.arrayUnion(milestoneRef)
+    // Remove from user's milestones subcollections
+    const userMilestoneTypes = ["pending", "accepted", "signed", "declined"];
+    for (const type of userMilestoneTypes) {
+      const userRef = db.collection("users").doc(ownerUid).collection("milestones").doc(type);
+      const userDoc = await userRef.get();
+      if (userDoc.exists) {
+        await userRef.update({
+          milestoneRefs: (userDoc.data()?.milestoneRefs || []).filter(
+            (ref: any) =>
+              (typeof ref === "string"
+                ? !ref.endsWith(`/${milestoneId}`)
+                : !ref.path.endsWith(`/${milestoneId}`))
+          ),
         });
       }
     }
 
-    // Update the milestone document to track who declined it
-    await milestoneRef.update({
-      declinedBy: FieldValue.arrayUnion({
-        uid: currentUserUid,
-        timestamp: Timestamp.now()
-      }),
-      status: "declined" // Add a status field for easy filtering
-    });
+    // Remove from IPFS
+    const cleanupCid = async (cid: string | null) => {
+      if (!cid) return;
+      try {
+        const cidObj = CID.parse(cid);
+        await ipfs.pin.rm(cidObj);
+      } catch {}
+      try {
+        const cidObj = CID.parse(cid);
+        await ipfs.block.rm(cidObj);
+      } catch {}
+    };
+    await Promise.all([cleanupCid(metadataCid), cleanupCid(imageCid)]);
 
-    // Add to global expiring milestones for automated cleanup
-    const expiryDate = new Date();
-    expiryDate.setDate(expiryDate.getDate() + 3); // 3 days from now
+    // Remove from smart contract
+    // Get owner's wallet address
+    const ownerWalletDoc = await db
+      .collection("users")
+      .doc(ownerUid)
+      .collection("wallet")
+      .doc("wallet_info")
+      .get();
+    const ownerAddress = ownerWalletDoc.data()?.address;
+    if (!ownerAddress) {
+      return createErrorResponse("NOT_FOUND", "Owner wallet address not found", 404);
+    }
 
-    const expiringMilestonesRef = db.collection("expiringMilestones").doc(milestoneId);
-    await expiringMilestonesRef.set({
-      milestoneRef,
-      owner: ownerUid,
-      declinedBy: currentUserUid,
-      declinedAt: Timestamp.now(),
-      expiryDate: Timestamp.fromDate(expiryDate),
-      processed: false
-    });
+    // Remove milestone on-chain (adminWallet must be authorized)
+    try {
+      const tx = await trackerContract.connect(adminWallet).removeMilestone(ownerAddress, milestoneId);
+      await tx.wait();
+    } catch (err: any) {
+      return createErrorResponse("BLOCKCHAIN_ERROR", "Failed to remove milestone from contract: " + err.message, 500);
+    }
 
     return new Response(
-      JSON.stringify({
-        message: "Milestone declined successfully",
-        declinedMilestoneId: milestoneId,
-      }),
+      JSON.stringify({ success: true, message: "Milestone fully removed" }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
-  } catch (error: unknown) {
-    console.error("Error in milestone decline API:", error);
-    return new Response(
-      JSON.stringify({ error: "Internal Server Error", message: error instanceof Error ? error.message : "Unknown error" }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
+  } catch (error: any) {
+    return createErrorResponse("SERVER_ERROR", error.message || "Unexpected error", 500);
   }
 };
