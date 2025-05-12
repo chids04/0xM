@@ -3,6 +3,7 @@ import { collection, doc, getDoc, getDocs, getFirestore } from 'firebase/firesto
 import { app, auth } from '../../firebase/client';
 import { getAuth, onAuthStateChanged } from 'firebase/auth'
 import html2canvas from 'html2canvas-pro';
+import { ethers } from 'ethers';
 
 interface MilestoneTimelineProps {
   userId: string;
@@ -22,8 +23,10 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
   const [isMobile, setIsMobile] = useState(false);
   const [currentUsername, setCurrentUsername] = useState<string | null>(null);
   const [firebaseUserInfo, setFirebaseUserInfo] = useState(auth.currentUser);
+  const [isLoading, setIsLoading] = useState(true);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
 
-  
   // Verification states
   const [verificationStatus, setVerificationStatus] = useState<Record<string, { verified: boolean, loading: boolean, error?: string }>>({});
   const [batchVerifying, setBatchVerifying] = useState(false);
@@ -46,6 +49,17 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
   const [nftMintPrice, setNftMintPrice] = useState<string | null>(null);
   const [nftPriceLoading, setNftPriceLoading] = useState(true);
   const [nftPriceError, setNftPriceError] = useState<string | null>(null);
+  
+  // Helper function for setting status messages
+  const setStatus = (msg: string, type: "success" | "error" = "error") => {
+    setStatusMessage(msg);
+    setStatusType(type);
+    setTimeout(() => {
+      setStatusMessage(null);
+      setStatusType(null);
+    }, 5000);
+  };
+  
   // Check for mobile screen size
   useEffect(() => {
     const checkScreenSize = () => {
@@ -85,14 +99,13 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
   // Fetch milestones from Firebase
   useEffect(() => {
     const db = getFirestore(app);
-    const auth = getAuth(app)
+    const auth = getAuth(app);
 
-    console.log(auth)
-    const user = auth.currentUser
+    setIsLoading(true);
+    setStatus("Loading milestones...", "success");
 
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
-        console.log(user.displayName)
         setCurrentUsername(user.displayName || 'Anonymous');
         setFirebaseUserInfo(user);
       } else {
@@ -100,7 +113,24 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
         setFirebaseUserInfo(null);
       }
     });
-
+    
+    // Helper function to fetch with timeout
+    const fetchWithTimeout = async (url: string, timeoutMs = 10000) => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      
+      try {
+        const response = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        return response;
+      } catch (error) {
+        clearTimeout(timeoutId);
+        if ((error as Error).name === 'AbortError') {
+          throw new Error('Request timed out after ' + timeoutMs + 'ms');
+        }
+        throw error;
+      }
+    };
 
     const fetchMilestones = async () => {
       try {
@@ -111,42 +141,79 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
           console.error("Accepted milestones document does not exist.");
           setMilestones([]);
           setFilteredMilestones([]);
+          setStatus("No milestones found", "error");
           return;
         }
 
         const acceptedData = acceptedSnapshot.data();
         const milestoneRefs = acceptedData?.milestoneRefs || [];
-
+        
+        if (milestoneRefs.length === 0) {
+          setStatus("No milestones found", "error");
+          setMilestones([]);
+          setFilteredMilestones([]);
+          return;
+        }
+        
+        setStatus(`Loading ${milestoneRefs.length} milestones...`, "success");
+        
         // Fetch milestone Firestore docs
-        const milestonesDataPromises = milestoneRefs.map(async (ref: any) => {
+        const milestonesDataPromises = milestoneRefs.map(async (ref: any, index: number) => {
           try {
             // ref is a DocumentReference
             const milestoneSnapshot = await getDoc(ref);
             if (!milestoneSnapshot.exists()) return null;
+            
             const milestoneDocData = milestoneSnapshot.data();
             // Only include if owner matches current userId
             if (!milestoneDocData?.owner || milestoneDocData.owner !== userId) return null;
+            
             // Get IPFS CID from milestoneDocData
             const metadataCid = milestoneDocData?.ipfsCIDs?.metadataCid;
             if (!metadataCid) return null;
 
-            // Fetch milestone data from IPFS
+            // Fetch milestone data from IPFS with timeout
             const ipfsUrl = `https://ipfs.io/ipfs/${metadataCid}`;
-            const ipfsResponse = await fetch(ipfsUrl);
-            if (!ipfsResponse.ok) {
-              console.error("Failed to fetch milestone data from IPFS:", ipfsUrl);
-              return null;
-            }
-            const ipfsData = await ipfsResponse.json();
+            try {
+              const ipfsResponse = await fetchWithTimeout(ipfsUrl, 10000); // 10 second timeout
+              
+              if (!ipfsResponse.ok) {
+                console.error("Failed to fetch milestone data from IPFS:", ipfsUrl);
+                
+                // Return partial data if IPFS fetch fails
+                return {
+                  id: milestoneSnapshot.id,
+                  description: `Milestone ${index + 1} (IPFS data unavailable)`,
+                  milestone_date: milestoneDocData.createdAt || new Date().toISOString(),
+                  createdAt: milestoneDocData.createdAt || new Date().toISOString(),
+                  ...milestoneDocData,
+                  ipfsError: true
+                };
+              }
+              
+              const ipfsData = await ipfsResponse.json();
 
-            // Merge Firestore doc data (for id, owner, etc.) with IPFS data
-            return {
-              id: milestoneSnapshot.id,
-              ...ipfsData,
-              ...milestoneDocData,
-            };
+              // Merge Firestore doc data (for id, owner, etc.) with IPFS data
+              return {
+                id: milestoneSnapshot.id,
+                ...ipfsData,
+                ...milestoneDocData,
+              };
+            } catch (ipfsError) {
+              console.error("Error or timeout fetching from IPFS:", ipfsError);
+              
+              // Return partial data if IPFS fetch times out
+              return {
+                id: milestoneSnapshot.id,
+                description: `Milestone ${index + 1} (IPFS data unavailable)`,
+                milestone_date: milestoneDocData.createdAt || new Date().toISOString(),
+                createdAt: milestoneDocData.createdAt || new Date().toISOString(),
+                ...milestoneDocData,
+                ipfsError: true
+              };
+            }
           } catch (error) {
-            console.error("Error fetching milestone from Firestore/IPFS:", error, ref);
+            console.error("Error fetching milestone from Firestore:", error, ref);
             return null;
           }
         });
@@ -159,16 +226,30 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
 
         setMilestones(milestonesData);
         setFilteredMilestones(milestonesData);
+        
+        const ipfsErrorCount = milestonesData.filter(m => m.ipfsError).length;
+        if (ipfsErrorCount > 0) {
+          setStatus(`Loaded ${milestonesData.length} milestones. Note: ${ipfsErrorCount} milestones have incomplete data due to IPFS timeout.`, "error");
+        } else {
+          setStatus(`Successfully loaded ${milestonesData.length} milestones`, "success");
+        }
       } catch (error) {
         console.error("Error fetching milestones:", error);
+        setStatus(`Error loading milestones: ${(error as Error).message}`, "error");
         setMilestones([]);
         setFilteredMilestones([]);
+      } finally {
+        setIsLoading(false);
       }
     };
 
     if (userId) {
       fetchMilestones();
     }
+    
+    return () => {
+      unsubscribe();
+    };
   }, [userId]);
 
   // Measure milestone card heights after render
@@ -290,6 +371,7 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
   // Verify a single milestone
   const verifyMilestone = async (milestoneId: string) => {
     try {
+      setStatus("Starting milestone verification...", "success");
       setVerificationStatus(prev => ({
         ...prev,
         [milestoneId]: { ...prev[milestoneId], loading: true }
@@ -307,6 +389,12 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
         throw new Error(data.message || 'Verification failed');
       }
 
+      if (data.verified) {
+        setStatus("Milestone verified successfully!", "success");
+      } else {
+        setStatus("Milestone verification failed: hash mismatch detected", "error");
+      }
+
       setVerificationStatus(prev => ({
         ...prev,
         [milestoneId]: { 
@@ -319,6 +407,8 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
       return data.verified;
     } catch (error: any) {
       console.error("Error verifying milestone:", error);
+      setStatus(`Verification error: ${error.message}`, "error");
+      
       setVerificationStatus(prev => ({
         ...prev,
         [milestoneId]: { 
@@ -337,12 +427,15 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
     
     setBatchVerifying(true);
     setBatchResults(null);
+    setStatus("Starting batch verification of all milestones...", "success");
     
     try {
       let verified = 0;
       let failed = 0;
+      const total = filteredMilestones.length;
       
       for (const milestone of filteredMilestones) {
+        setStatus(`Verifying milestone ${verified + failed + 1} of ${total}...`, "success");
         const isVerified = await verifyMilestone(milestone.id);
         if (isVerified) {
           verified++;
@@ -352,12 +445,19 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
       }
       
       setBatchResults({
-        total: filteredMilestones.length,
+        total,
         verified,
         failed
       });
+      
+      if (failed === 0) {
+        setStatus(`All ${verified} milestones verified successfully!`, "success");
+      } else {
+        setStatus(`Verification complete: ${verified} succeeded, ${failed} failed`, "error");
+      }
     } catch (error) {
       console.error("Error during batch verification:", error);
+      setStatus("Error during batch verification. Please try again.", "error");
     } finally {
       setBatchVerifying(false);
     }
@@ -367,10 +467,11 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
   const handleShowPreview = (milestone: any) => {
     const status = verificationStatus[milestone.id];
     if (!status || !status.verified) {
-      alert('Milestone must be verified before previewing.');
+      setStatus("Milestone must be verified before previewing. Please verify the milestone first.", "error");
       return;
     }
 
+    setStatus("Opening milestone preview...", "success");
     setPreviewData({
       visible: true,
       milestone,
@@ -381,59 +482,191 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
 
   const handleSaveImage = async () => {
     if (!previewData.milestone) return;
-    
+  
     setPreviewData(prev => ({ ...prev, loading: true }));
-    
+    setStatus("Starting NFT minting process...", "success");
+  
     try {
       const certificateElement = document.getElementById('certificate-container');
       if (!certificateElement) throw new Error('Certificate element not found');
-
+  
+      setStatus("Generating certificate image...", "success");
       const canvas = await html2canvas(certificateElement, {
         scale: 2,
         logging: true,
         useCORS: true,
         backgroundColor: '#1a1a1a'
       });
-
+  
       // Convert canvas to a blob
-      const blob = await new Promise<Blob>((resolve) => {
+      const blob = await new Promise<Blob>((resolve, reject) => {
         canvas.toBlob((blob) => {
           if (blob) {
             resolve(blob);
           } else {
-            throw new Error('Failed to create image blob');
+            reject(new Error('Failed to create image blob'));
           }
         }, 'image/png');
       });
-
+  
       // Create a file object from the blob
       const fileName = `milestone-${previewData.milestone.id}.png`;
       const imageFile = new File([blob], fileName, { type: 'image/png' });
+  
+      // 1. Permit signature for NFT mint price
+      if (!nftMintPrice) throw new Error("NFT mint price not loaded");
+      
+      setStatus("Preparing payment transaction...", "success");
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      
+      if(!window.ethereum || !window.ethereum.selectedAddress) {
+        throw new Error("Please connect your wallet to proceed.");
+      }
 
-      // Create form data for API request
+      const signer = await provider.getSigner();
+
+      // Request permit data for the mint price
+      const permitRes = await fetch("/api/transaction/make-permit-tx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userAddress: window.ethereum.selectedAddress,
+          amount: nftMintPrice,
+        }),
+      });
+      
+      if (!permitRes.ok) {
+        const errorData = await permitRes.json();
+        throw new Error(errorData?.error?.message || "Failed to create permit transaction");
+      }
+      
+      const permitData = await permitRes.json();
+      const { domain: permitDomain, types: permitTypes, message: permitMessage } = permitData;
+      
+      setStatus("Please sign the payment authorization in your wallet", "success");
+      setPreviewData(prev => ({ ...prev, loading: true, error: null }));
+      let permitSignature;
+      try {
+        permitSignature = await signer.signTypedData(permitDomain, permitTypes, permitMessage);
+      } catch (error) {
+        setStatus("Payment signature was rejected", "error");
+        setPreviewData(prev => ({
+          ...prev,
+          loading: false,
+          error: "Payment signature rejected."
+        }));
+        return;
+      }
+  
+      // send permit to backend
+      setStatus("Processing payment...", "success");
+      const permitTx = await fetch("/api/transaction/send-permit-tx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          payload: permitData,
+          signature: permitSignature,
+        }),
+      });
+      
+      if (!permitTx.ok) {
+        const errorData = await permitTx.json();
+        throw new Error(errorData?.error?.message || "Failed to send permit transaction");
+      }
+  
+      // 2. Create meta-tx for NFT mint
+      setStatus("Preparing NFT metadata...", "success");
       const formData = new FormData();
       formData.append('image', imageFile);
       formData.append('milestoneId', previewData.milestone.id);
       formData.append('userId', userId);
-
-      // Make API request to create NFT
-      const response = await fetch('/api/nft/create', { 
+      formData.append('milestoneDescription', previewData.milestone.description);
+  
+      const mintTxRes = await fetch('/api/nft/create-mint-tx', {
         method: 'POST',
-        body: formData
+        body: formData,
       });
+      
+      if (!mintTxRes.ok) {
+        const errorData = await mintTxRes.json();
+        setPreviewData(prev => ({
+          ...prev,
+          loading: false,
+          error: errorData?.error?.message || "Failed to create NFT mint transaction"
+        }));
+        setStatus("Failed to create NFT mint transaction", "error");
+        throw new Error(errorData?.error?.message || "Failed to create NFT mint transaction");
+      }
+      
+      const { metaTxRequest, domain, types } = await mintTxRes.json();
+  
+      // 3. user signs meta-tx for minting NFT
+      setStatus("Please sign the NFT minting transaction in your wallet", "success");
+      let mintSignature;
+      try {
+        mintSignature = await signer.signTypedData(domain, types, metaTxRequest);
+      } catch {
+        setStatus("NFT minting signature was rejected", "error");
+        setPreviewData(prev => ({
+          ...prev,
+          loading: false,
+          error: "NFT mint signature rejected."
+        }));
+        return;
+      }
+      
+      const tx = { ...metaTxRequest, signature: mintSignature };
+  
+      // 4. relay meta-tx to backend
+      setStatus("Submitting NFT minting transaction to blockchain...", "success");
+      const relayRes = await fetch("/api/milestone/relay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          metaTx: tx,
+          type: "mintNFT"
+        }),
+      });
+      
+      if (!relayRes.ok) {
+        const errorData = await relayRes.json();
+        throw new Error(errorData?.error?.message || "Failed to relay NFT mint transaction");
+      }
+      
+      const result = await relayRes.json();
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error?.message || 'Failed to mint NFT');
+      if (!result.success) {
+        throw new Error(result.message || "Failed to mint NFT");
       }
 
-      const result = await response.json();
-      
+      const { txHash, blockNum } = result;
+
+      // Save NFT tokenId to Firestore for the user
+      setStatus("Saving NFT information...", "success");
+      try {
+        const saveTokenIdRes = await fetch("/api/nft/save-tokenid", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ txHash, blockNum }),
+        });
+        if (!saveTokenIdRes.ok) {
+          const errorData = await saveTokenIdRes.json();
+          console.error("Failed to save NFT tokenId:", errorData?.message || errorData?.error || saveTokenIdRes.statusText);
+        } else {
+          const { tokenId } = await saveTokenIdRes.json();
+          console.log("NFT tokenId saved:", tokenId);
+        }
+      } catch (err) {
+        console.error("Error calling save-tokenid endpoint:", err);
+      }
+
       // Show success notification
-      alert(`NFT minted successfully! Token ID: ${result.tokenId}...`);
+      setStatus("NFT minted successfully!", "success");
+      alert(`NFT minted successfully! Tx Hash: ${result.txHash}`);
       setPreviewData(prev => ({ ...prev, loading: false, visible: false }));
     } catch (error: any) {
       console.error('Error minting NFT:', error);
+      setStatus(`Error minting NFT: ${error.message}`, "error");
       setPreviewData(prev => ({
         ...prev,
         loading: false,
@@ -483,6 +716,16 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
   return (
     <div className="container mx-auto px-4 py-8">
       <h1 className="text-3xl font-bold text-white mb-6">Your Milestones</h1>
+      
+      {statusMessage && (
+        <div className={`mb-4 p-4 rounded-xl ${
+          statusType === 'success' ? 'bg-green-900/30 text-green-400 border border-green-500/20' : 
+          'bg-red-900/30 text-red-400 border border-red-500/20'
+        }`}>
+          {statusMessage}
+        </div>
+      )}
+      
       <div className="mb-6">
           {nftPriceLoading ? (
             <div className="p-4 bg-[#222] rounded-xl border border-purple-500/20 animate-pulse">
@@ -585,7 +828,12 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
         )}
       </div>
 
-      {filteredMilestones.length === 0 && (
+      {isLoading ? (
+        <div className="text-center py-8">
+          <div className="inline-block animate-spin h-8 w-8 border-4 border-purple-500 border-t-transparent rounded-full mb-2"></div>
+          <p className="text-gray-400">Loading your milestones...</p>
+        </div>
+      ) : filteredMilestones.length === 0 && (
         <div className="text-center py-8 text-gray-400">
           No milestones found matching your filters.
         </div>
@@ -686,7 +934,7 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
               {previewData.milestone.image && (
                 <div className="mt-4 flex justify-center">
                 <img
-                  src={previewData.milestone.image}
+                  src={`https://ipfs.io/ipfs/${previewData.milestone.image}`}
                   alt="Milestone"
                   className="max-w-full h-auto rounded-lg"
                   style={{ maxHeight: '200px' }}

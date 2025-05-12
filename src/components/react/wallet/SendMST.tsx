@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { TagFriendDropdown } from "../TagFriendDropdown";
 import type { Friend } from "../ClientTagFriendDropdown";
 
+import { ethers } from 'ethers';
+
 interface SendMSTProps {
   friends: Friend[];
   senderAddress: string;
@@ -20,6 +22,7 @@ export function SendMST({ friends, senderAddress, currentUser}: SendMSTProps) {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [transferFee, setTransferFee] = useState<string | null>(null);
 
   // Only clear messages after a delay to ensure they're seen
   useEffect(() => {
@@ -31,6 +34,27 @@ export function SendMST({ friends, senderAddress, currentUser}: SendMSTProps) {
       return () => clearTimeout(timer);
     }
   }, [success, error]);
+
+  useEffect(() => {
+  const fetchTransferFee = async () => {
+    try {
+      const res = await fetch("/api/milestone/fees", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ feeType: "transfer" }),
+      });
+      const data = await res.json();
+      if (data.success && data.fees.transferFee) {
+        setTransferFee(data.fees.transferFee);
+      } else {
+        setTransferFee(null);
+      }
+    } catch {
+      setTransferFee(null);
+    }
+  };
+  fetchTransferFee();
+}, []);
 
   useEffect(() => {
     if (selectedFriend) {
@@ -89,24 +113,121 @@ export function SendMST({ friends, senderAddress, currentUser}: SendMSTProps) {
     setSuccess(null);
     
     try {
-      const response = await fetch('/api/wallet/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+
+
+
+      const payment = await fetch("api/transaction/make-permit-tx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          senderAddress,
-          recipientAddress,
-          currentUser,
-          friendUser: selectedFriend,
-          amount: parseFloat(amount)
-        })
+          userAddress: window.ethereum.selectedAddress,
+          amount: transferFee ?? "2"
+        }),
       });
-      
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.error.message || 'Failed to send tokens');
+
+      setSuccess("Please approve the transaction in your wallet.");
+
+
+      const paymentData = await payment.json();
+      const { domain: paymentDomain, types: paymentTypes, message: paymentMessage } = paymentData;
+
+      let paymentSignature;
+      try {
+        paymentSignature = await signer.signTypedData(paymentDomain, paymentTypes, paymentMessage);
+      } catch {
+        setError("Transaction rejected. Please try again.");
+        return;
       }
-      
+
+      const paymentTx = await fetch("/api/transaction/send-permit-tx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          payload: paymentData,
+          signature: paymentSignature,
+        }),
+      });
+
+      if (!paymentTx.ok) {
+        const errorData = await paymentTx.json();
+        throw new Error(errorData?.error?.message || "Failed to send payment transaction");
+      }
+
+      const paymentTxData = await paymentTx.json();
+      setSuccess(`Payment transaction sent: ${paymentTxData.txHash}`);
+
+
+      const txDetails = await fetch("api/wallet/create-transfer-tx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fromAddress: window.ethereum.selectedAddress,
+          toAddress: recipientAddress,
+          amount: amount
+        }),
+      });
+
+      if (!txDetails.ok) {
+        const errorData = await txDetails.json();
+        throw new Error(errorData?.error?.message || "Failed to create transfer transaction");
+      }
+      setSuccess("Please sign the transaction in your wallet.");
+
+      const txData = await txDetails.json();
+      const { domain, types, metaTxRequest } = txData;
+
+      let transactionSignature;
+      try {
+        transactionSignature = await signer.signTypedData(domain, types, metaTxRequest);
+      } catch {
+        setError("Transaction rejected. Please try again.");
+        return;
+      }
+
+      const tx = { ...metaTxRequest, signature: transactionSignature };
+
+      console.log(tx)
+
+      const relayRes = await fetch("/api/milestone/relay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          metaTx: tx,
+          type: "transfer"
+        }),
+      });
+
+      if (!relayRes.ok) {
+        throw new Error("Failed to transfer tokens, please try again later");
+      }
+
+      const relayData = await relayRes.json();
+      if (!relayData.success) {
+        throw new Error("Failed to transfer tokens, please try again later");
+      }
+
+      const { txHash, blockNum } = relayData;
+
+      const storeRes = await fetch("/api/wallet/save-transaction", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          from: window.ethereum.selectedAddress,
+          to: recipientAddress,
+          amount: parseFloat(amount),
+          txHash,
+          timestamp: Date.now(),
+          blockNumber: blockNum
+        }),
+      });
+
+      await storeRes.json();
+      if(!storeRes.ok) {
+        setError("Transaction sent, but failed to store in database.");
+      }
+
       setSuccess(`Successfully sent ${amount} MST to ${selectedFriend ? selectedFriend.displayName : recipientAddress}`);
       setAmount("0");
       setRecipientAddress("");
@@ -123,7 +244,13 @@ export function SendMST({ friends, senderAddress, currentUser}: SendMSTProps) {
     <Card className="bg-[#1a1a1a] border border-purple-500/20 shadow-lg overflow-hidden">
       <CardHeader className="border-b border-[#333333] pb-4">
         <CardTitle className="text-white text-xl">Send Milestone Token</CardTitle>
+        {transferFee && (
+          <div className="text-xs text-gray-400 mb-2">
+            Transfer Fee: <span className="text-purple-400">{transferFee} MST</span>
+          </div>
+        )}
       </CardHeader>
+      
       
       <CardContent className="p-6 space-y-4">
         {/* Friend Selection */}
@@ -219,6 +346,7 @@ export function SendMST({ friends, senderAddress, currentUser}: SendMSTProps) {
       </CardContent>
       
       <CardFooter className="bg-[#1f1f1f] border-t border-[#333333] p-4">
+       
         <Button 
           className="w-full bg-purple-600 hover:bg-purple-700 text-white"
           disabled={isLoading}

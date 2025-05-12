@@ -28,7 +28,7 @@ const walletDoc = await walletRef.get()
 const walletData = walletDoc.data()
 
 if(walletData){
-    walletAddress = walletData.publicKey;
+    walletAddress = walletData.address;
 }
 
 const requestStatusDoc = await db
@@ -111,7 +111,7 @@ if (friendIds.length > 0) {
         <!-- Tab Content -->
         <div class="p-6">
           <div id="balance" class="tab-content">
-            <WalletBalance client:visible walletAddress={walletAddress} currentUser={user}/>
+            <WalletBalance client:visible currentUser={user}/>
           </div>
           <div id="send" class="tab-content hidden">
             <SendMST client:visible friends={friends} senderAddress={walletAddress} currentUser={user}/>

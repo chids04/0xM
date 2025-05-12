@@ -357,10 +357,15 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
     } else if (subscription && subscription.tierName === "Tier2" && feeData.tier2DiscountPercent) {
       discountPercent = feeData.tier2DiscountPercent;
     }
-    const baseFeeNum = Number(baseFee);
-    if (isNaN(baseFeeNum)) return baseFee;
-    const discountedFee = baseFeeNum * (1 - discountPercent / 100);
-    return discountedFee.toString();
+    try {
+      const baseFeeWei = ethers.parseEther(baseFee); 
+      const discountedFeeWei = (baseFeeWei * BigInt(100 - discountPercent)) / BigInt(100);
+      const needsRounding = (baseFeeWei * BigInt(100 - discountPercent)) % BigInt(100) !== BigInt(0);
+      const finalFeeWei = needsRounding ? discountedFeeWei + BigInt(1) : discountedFeeWei;
+      return ethers.formatEther(finalFeeWei);
+    } catch {
+      return baseFee;
+    }
   };
 
   // --- Write Limit Info ---

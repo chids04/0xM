@@ -48,9 +48,22 @@ export const POST: APIRoute = async ({ request, cookies }) => {
         }
         else if(type == "sign"){
             tx = await relayerContract.relaySignMilestone(metaTx)
+        }
+        else if(type == "decline") {
+            tx = await relayerContract.relayRemoveMilestone(metaTx)
+        }
+        else if(type == "transfer"){
+            tx = await relayerContract.relayTransfer(metaTx)
+        }
+        else if(type=="subscribe"){
+            tx = await relayerContract.relaySubscribe(metaTx)
+        }
+        else if(type=="mintNFT"){     
+            tx = await relayerContract.relayMintNFT(metaTx)
         } else {
             return createErrorResponse("INVALID_TYPE", "Invalid transaction type", 400);
         }
+
 
         const receipt = await tx.wait();
 

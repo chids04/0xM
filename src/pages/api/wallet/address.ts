@@ -33,7 +33,7 @@ export const GET: APIRoute = async ({ request }) => {
     }
 
     const walletData = walletDoc.data();
-    const address = walletData?.publicKey;
+    const address = walletData?.address;
 
     if (!address) {
       return new Response(

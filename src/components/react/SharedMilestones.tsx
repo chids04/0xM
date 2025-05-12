@@ -25,17 +25,17 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
   const [feeLoading, setFeeLoading] = useState(true);
   const [feeError, setFeeError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
-  
+  const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
+
   // Verification states
   const [verificationStatus, setVerificationStatus] = useState<Record<string, { verified: boolean, loading: boolean, error?: string }>>({});
   const [batchVerifying, setBatchVerifying] = useState(false);
   const [batchResults, setBatchResults] = useState<{ total: number, verified: number, failed: number } | null>(null);
 
   //nft minting price
-    const [nftMintPrice, setNftMintPrice] = useState<string | null>(null);
-    const [nftPriceLoading, setNftPriceLoading] = useState(true);
-    const [nftPriceError, setNftPriceError] = useState<string | null>(null);
+  const [nftMintPrice, setNftMintPrice] = useState<string | null>(null);
+  const [nftPriceLoading, setNftPriceLoading] = useState(true);
+  const [nftPriceError, setNftPriceError] = useState<string | null>(null);
 
   // Preview modal state
   const [previewData, setPreviewData] = useState<{
@@ -60,29 +60,29 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
   };
 
   useEffect(() => {
-      const fetchNftMintPrice = async () => {
-        try {
-          setNftPriceLoading(true);
-          setNftPriceError(null);
-          const response = await fetch("/api/nft/mint-price", {
-            method: "GET",
-            headers: { "Content-Type": "application/json" },
-          });
-    
-          if (!response.ok) throw new Error((await response.json())?.error?.message || "Failed to fetch NFT mint price");
-          const data = await response.json();
-          if (data.success && data.price) setNftMintPrice(data.price);
-          else throw new Error("Invalid price data received");
-        } catch (error) {
-          console.error("Error fetching NFT mint price:", error);
-          setNftPriceError((error as Error).message || "Failed to fetch NFT mint price");
-        } finally {
-          setNftPriceLoading(false);
-        }
-      };
-    
-      fetchNftMintPrice();
-    }, []);
+    const fetchNftMintPrice = async () => {
+      try {
+        setNftPriceLoading(true);
+        setNftPriceError(null);
+        const response = await fetch("/api/nft/mint-price", {
+          method: "GET",
+          headers: { "Content-Type": "application/json" },
+        });
+
+        if (!response.ok) throw new Error((await response.json())?.error?.message || "Failed to fetch NFT mint price");
+        const data = await response.json();
+        if (data.success && data.price) setNftMintPrice(data.price);
+        else throw new Error("Invalid price data received");
+      } catch (error) {
+        console.error("Error fetching NFT mint price:", error);
+        setNftPriceError((error as Error).message || "Failed to fetch NFT mint price");
+      } finally {
+        setNftPriceLoading(false);
+      }
+    };
+
+    fetchNftMintPrice();
+  }, []);
 
   useEffect(() => {
     const checkScreenSize = () => {
@@ -168,7 +168,7 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
             .sort((a, b) => new Date(a.milestone_date).getTime() - new Date(b.milestone_date).getTime());
 
           // Check for finalized milestones to move to accepted
-          const finalizedMilestones = signedMilestonesData.filter(milestone => 
+          const finalizedMilestones = signedMilestonesData.filter(milestone =>
             milestone.isPending === false
           );
 
@@ -199,10 +199,10 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
             if (acceptedDoc.exists()) {
               const acceptedData = acceptedDoc.data();
               const acceptedRefs = acceptedData?.milestoneRefs || [];
-              const refsToAdd = finalizedMilestones.map(milestone => 
+              const refsToAdd = finalizedMilestones.map(milestone =>
                 doc(db, "milestones", milestone.id)
               );
-              const uniqueRefsToAdd = refsToAdd.filter(newRef => 
+              const uniqueRefsToAdd = refsToAdd.filter(newRef =>
                 !acceptedRefs.some((existingRef: string | { path?: string }) => {
                   if (typeof existingRef === 'string') {
                     return existingRef.endsWith(`/${newRef.id}`);
@@ -216,7 +216,7 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
                 batch.update(acceptedRef, { milestoneRefs: [...acceptedRefs, ...uniqueRefsToAdd] });
               }
             } else {
-              const refsToAdd = finalizedMilestones.map(milestone => 
+              const refsToAdd = finalizedMilestones.map(milestone =>
                 doc(db, "milestones", milestone.id)
               );
               batch.set(acceptedRef, { milestoneRefs: refsToAdd });
@@ -225,8 +225,8 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
             try {
               await batch.commit();
               console.log("Successfully moved finalized milestones from signed to accepted");
-              signedMilestonesData = signedMilestonesData.filter(milestone => 
-                milestone.isPending !== false && 
+              signedMilestonesData = signedMilestonesData.filter(milestone =>
+                milestone.isPending !== false &&
                 milestone.finalizedAt === undefined
               );
             } catch (error) {
@@ -466,13 +466,14 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
     }
 
     setIsLoading(true);
+    setStatus("Do not refresh or you risk losing your tokens", "success")
     try {
-      if(!feeData){
+      if (!feeData) {
         throw new Error("Fee data not available, try again later");
       }
 
       const provider = new ethers.BrowserProvider(window.ethereum);
-            const signer = await provider.getSigner();
+      const signer = await provider.getSigner();
 
       const payment = await fetch("api/transaction/make-permit-tx", {
         method: "POST",
@@ -483,7 +484,9 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
         }),
       });
 
-      if(!payment.ok) {
+      setStatus("Please accept the payment request in your wallet", "success")
+
+      if (!payment.ok) {
         throw new Error("Failed to create payment transaction, please try again later");
       }
 
@@ -525,17 +528,18 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
         }),
       });
 
-      if(!accept.ok) {
+      if (!accept.ok) {
         const errorData = await accept.json();
         throw new Error(errorData?.error?.message || "Failed to create blockchain transaction, please try again later");
       }
 
-      const { metaTxRequest, domain, types }  = await accept.json();
+      const { metaTxRequest, domain, types } = await accept.json();
+      setStatus("Please accept the transaction request in your wallet", "success")
 
       let signedTransaction;
       try {
         signedTransaction = await signer.signTypedData(domain, types, metaTxRequest);
-      }catch {
+      } catch {
         setStatus("Signature request was rejected.", "error");
         throw new Error("Signature request was rejected.");
       }
@@ -568,7 +572,7 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
       const storeRes = await fetch("/api/milestone/save-signature", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({  
+        body: JSON.stringify({
           milestoneId: pendingMilestone.id,
           blockNumber: blockNum,
           hash: txHash
@@ -587,7 +591,7 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
 
       setPendingMilestones(prev => prev.filter(item => item.id !== pendingMilestone.id));
       if (result.isFinalized) {
-        const newMilestone = { ...pendingMilestone, isPending: false};
+        const newMilestone = { ...pendingMilestone, isPending: false };
         setMilestones(prev => [...prev, newMilestone].sort((a, b) => new Date(a.milestone_date).getTime() - new Date(b.milestone_date).getTime()));
       }
       setStatus("Milestone accepted successfully!", "success");
@@ -601,35 +605,147 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
 
   const handleDenyMilestone = async (pendingMilestone: any) => {
     if (!userId || pendingMilestone.owner === userId) {
-      alert("You can't deny your own milestone. If you no longer want this milestone, please delete it.");
+      setStatus("You can't deny your own milestone. If you no longer want this milestone, please delete it.", "error");
       return;
     }
 
     setIsLoading(true);
+    setStatus("Starting the milestone denial process. Do not refresh the page.", "success");
+
     try {
-      const message = `Decline milestone ${pendingMilestone.id} at ${Date.now()}`;
-      const signature = await window.ethereum.request({
-        method: "personal_sign",
-        params: [message, window.ethereum.selectedAddress],
+      if (!feeData?.signMilestoneFee) {
+        throw new Error("Fee data not available, please try again later");
+      }
+      
+      setStatus("Preparing blockchain transaction...", "success");
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      
+      if (!window.ethereum || !window.ethereum.selectedAddress) {
+        throw new Error("MetaMask wallet not connected");
+      }
+      
+      const signer = await provider.getSigner();
+
+      setStatus("Preparing payment transaction...", "success");
+      const payment = await fetch("api/transaction/make-permit-tx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userAddress: window.ethereum.selectedAddress,
+          amount: feeData.signMilestoneFee,
+        }),
       });
-      const response = await fetch('/api/milestone/decline', {
+
+      if (!payment.ok) {
+        const errorData = await payment.json();
+        throw new Error(errorData?.error?.message || "Failed to create payment transaction");
+      }
+
+      const paymentData = await payment.json();
+      const { domain: paymentDomain, types: paymentTypes, message: paymentMessage } = paymentData;
+      setStatus(`Please sign the payment authorization for ${feeData.signMilestoneFee} MST in your wallet`, "success");
+
+      let paymentSignature;
+      try {
+        paymentSignature = await signer.signTypedData(paymentDomain, paymentTypes, paymentMessage);
+      } catch {
+        setStatus("Payment signature was rejected", "error");
+        throw new Error("Payment signature was rejected");
+      }
+
+      setStatus("Processing payment...", "success");
+      const paymentTx = await fetch("/api/transaction/send-permit-tx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          payload: paymentData,
+          signature: paymentSignature,
+        }),
+      });
+
+      if (!paymentTx.ok) {
+        const errorData = await paymentTx.json();
+        throw new Error(errorData?.error?.message || "Failed to send payment transaction");
+      }
+
+      setStatus(`Successfully approved payment of ${feeData.signMilestoneFee} MST`, "success");
+      setStatus("Preparing milestone denial transaction...", "success");
+
+      const response = await fetch('/api/milestone/create-decline-tx', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           milestoneId: pendingMilestone.id,
-          signature,
-          message
+          ownerUid: pendingMilestone.owner || pendingMilestone.proposedBy,
         }),
       });
 
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.message || 'Failed to decline milestone');
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData?.error?.message || "Failed to create denial transaction");
+      }
 
+      const result = await response.json();
+      const { metaTxRequest, domain, types } = result;
+      
+      setStatus("Please sign the milestone denial transaction in your wallet", "success");
+      let signedTransaction;
+      try {
+        signedTransaction = await signer.signTypedData(domain, types, metaTxRequest);
+      } catch {
+        setStatus("Denial signature was rejected", "error");
+        throw new Error("Denial signature was rejected");
+      }
+      
+      const tx = {
+        ...metaTxRequest,
+        signature: signedTransaction,
+      };
+      
+      setStatus("Submitting denial transaction to blockchain...", "success");
+      const relayRes = await fetch("/api/milestone/relay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          metaTx: tx,
+          type: "decline",
+        }),
+      });
+      
+      if (!relayRes.ok) {
+        const errorData = await relayRes.json();
+        throw new Error(errorData?.error?.message || "Failed to relay denial transaction");
+      }
+      
+      const { txHash, blockNum } = await relayRes.json();
+      console.log("Transaction hash:", txHash);
+      console.log("Block number:", blockNum);
+
+      setStatus("Updating records...", "success");
+      const storeRes = await fetch("/api/milestone/save-decline", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          milestoneId: pendingMilestone.id,
+        }),
+      });
+      
+      if (!storeRes.ok) {
+        const errorData = await storeRes.json();
+        throw new Error(errorData?.error?.message || "Failed to update records");
+      }
+      
+      const resultStore = await storeRes.json();
+      if (!resultStore.success) {
+        throw new Error("Failed to update records");
+      }
+      
+      setStatus("Milestone declined successfully!", "success");
+      // Remove the declined milestone from the pending list 
       setPendingMilestones(prev => prev.filter(item => item.id !== pendingMilestone.id));
-      alert('Milestone declined successfully!');
     } catch (error: any) {
       console.error("Error declining milestone:", error);
-      alert(`Failed to decline milestone: ${error.message}`);
+      setStatus(`Error declining milestone: ${error.message}`, "error");
     } finally {
       setIsLoading(false);
     }
@@ -638,6 +754,7 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
   // Verify a single milestone
   const verifyMilestone = async (milestoneId: string) => {
     try {
+      setStatus("Starting milestone verification...", "success");
       setVerificationStatus(prev => ({
         ...prev,
         [milestoneId]: { ...prev[milestoneId], loading: true }
@@ -646,21 +763,27 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
       const response = await fetch('/api/milestone/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           userId: userId,
-          milestoneId: milestoneId 
+          milestoneId: milestoneId
         })
       });
 
       const data = await response.json();
-      
+
       if (!response.ok) {
         throw new Error(data.message || 'Verification failed');
       }
 
+      if (data.verified) {
+        setStatus("Milestone verified successfully!", "success");
+      } else {
+        setStatus("Milestone verification failed: hash mismatch detected", "error");
+      }
+
       setVerificationStatus(prev => ({
         ...prev,
-        [milestoneId]: { 
+        [milestoneId]: {
           verified: data.verified,
           loading: false,
           error: data.verified ? undefined : 'Hash mismatch detected'
@@ -670,16 +793,16 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
       return data.verified;
     } catch (error: any) {
       console.error("Error verifying milestone:", error);
-      
+      setStatus(`Verification error: ${error.message}`, "error");
+
       setVerificationStatus(prev => ({
         ...prev,
-        [milestoneId]: { 
-          verified: false, 
+        [milestoneId]: {
+          verified: false,
           loading: false,
           error: error.message
         }
       }));
-      
       return false;
     }
   };
@@ -687,16 +810,21 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
   // Verify all milestones owned by the user
   const verifyAllMilestones = async () => {
     const ownedMilestones = filteredMilestones.filter(m => m.owner === userId);
-    if (!ownedMilestones.length) return;
-    
+    if (!ownedMilestones.length) {
+      setStatus("No milestones to verify.", "error");
+      return;
+    }
+
     setBatchVerifying(true);
     setBatchResults(null);
-    
+    setStatus(`Starting batch verification of ${ownedMilestones.length} milestones...`, "success");
+
     try {
       let verified = 0;
       let failed = 0;
-      
+
       for (const milestone of ownedMilestones) {
+        setStatus(`Verifying milestone ${verified + failed + 1} of ${ownedMilestones.length}...`, "success");
         const isVerified = await verifyMilestone(milestone.id);
         if (isVerified) {
           verified++;
@@ -704,14 +832,21 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
           failed++;
         }
       }
-      
+
       setBatchResults({
         total: ownedMilestones.length,
         verified,
         failed
       });
-    } catch (error) {
+      
+      if (failed === 0) {
+        setStatus(`All ${verified} milestones verified successfully!`, "success");
+      } else {
+        setStatus(`Verification completed: ${verified} succeeded, ${failed} failed`, failed > 0 ? "error" : "success");
+      }
+    } catch (error: any) {
       console.error("Error during batch verification:", error);
+      setStatus(`Batch verification error: ${error.message}`, "error");
     } finally {
       setBatchVerifying(false);
     }
@@ -721,10 +856,11 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
   const handleShowPreview = (milestone: any) => {
     const status = verificationStatus[milestone.id];
     if (!status || !status.verified) {
-      alert('Milestone must be verified before previewing.');
+      setStatus("Milestone must be verified before previewing. Please verify the milestone first.", "error");
       return;
     }
 
+    setStatus("Opening milestone preview...", "success");
     setPreviewData({
       visible: true,
       milestone,
@@ -735,58 +871,190 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
 
   const handleSaveImage = async () => {
     if (!previewData.milestone) return;
-    
+  
     setPreviewData(prev => ({ ...prev, loading: true }));
-    
+    setStatus("Starting NFT minting process...", "success");
+  
     try {
       const certificateElement = document.getElementById('certificate-container');
       if (!certificateElement) throw new Error('Certificate element not found');
-
+  
       const canvas = await html2canvas(certificateElement, {
         scale: 2,
         logging: true,
         useCORS: true,
         backgroundColor: '#1a1a1a'
       });
-
-      const blob = await new Promise<Blob>((resolve) => {
+  
+      // Convert canvas to a blob
+      const blob = await new Promise<Blob>((resolve, reject) => {
         canvas.toBlob((blob) => {
           if (blob) {
             resolve(blob);
           } else {
-            throw new Error('Failed to create image blob');
+            reject(new Error('Failed to create image blob'));
           }
         }, 'image/png');
       });
-
+  
       // Create a file object from the blob
       const fileName = `milestone-${previewData.milestone.id}.png`;
       const imageFile = new File([blob], fileName, { type: 'image/png' });
+  
+      // 1. Permit signature for NFT mint price
+      if (!nftMintPrice) {
+        throw new Error("NFT mint price not available, please try again later");
+      }
+      
+      setStatus("Preparing payment transaction...", "success");
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      
+      if(!window.ethereum || !window.ethereum.selectedAddress) {
+        throw new Error("MetaMask wallet not connected");
+      }
 
-      // Create form data for API request
+      const signer = await provider.getSigner();
+
+      // Request permit data for the mint price
+      const permitRes = await fetch("/api/transaction/make-permit-tx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userAddress: window.ethereum.selectedAddress,
+          amount: nftMintPrice,
+        }),
+      });
+      
+      if (!permitRes.ok) {
+        const errorData = await permitRes.json();
+        throw new Error(errorData?.error?.message || "Failed to create permit transaction");
+      }
+      
+      const permitData = await permitRes.json();
+      const { domain: permitDomain, types: permitTypes, message: permitMessage } = permitData;
+      
+      setStatus("Please sign the payment authorization in your wallet", "success");
+      let permitSignature;
+      try {
+        permitSignature = await signer.signTypedData(permitDomain, permitTypes, permitMessage);
+      } catch (error) {
+        setStatus("Payment signature request was rejected", "error");
+        setPreviewData(prev => ({
+          ...prev,
+          loading: false,
+          error: "Payment signature was rejected"
+        }));
+        return;
+      }
+  
+      // Send permit to backend
+      setStatus("Processing payment...", "success");
+      const permitTx = await fetch("/api/transaction/send-permit-tx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          payload: permitData,
+          signature: permitSignature,
+        }),
+      });
+      
+      if (!permitTx.ok) {
+        const errorData = await permitTx.json();
+        throw new Error(errorData?.error?.message || "Failed to send permit transaction");
+      }
+      
+      // 2. Create meta-tx for NFT mint
+      setStatus("Preparing NFT metadata...", "success");
       const formData = new FormData();
       formData.append('image', imageFile);
       formData.append('milestoneId', previewData.milestone.id);
       formData.append('userId', userId);
-
-      // Make API request to create NFT
-      const response = await fetch('/api/nft/create', { 
+      formData.append('milestoneDescription', previewData.milestone.description);
+  
+      const mintTxRes = await fetch('/api/nft/create-mint-tx', {
         method: 'POST',
-        body: formData
+        body: formData,
       });
+      
+      if (!mintTxRes.ok) {
+        const errorData = await mintTxRes.json();
+        setPreviewData(prev => ({
+          ...prev,
+          loading: false,
+          error: errorData?.error?.message || "Failed to create NFT mint transaction"
+        }));
+        throw new Error(errorData?.error?.message || "Failed to create NFT mint transaction");
+      }
+      
+      const { metaTxRequest, domain, types } = await mintTxRes.json();
+  
+      // 3. User signs meta-tx for minting NFT
+      setStatus("Please sign the NFT minting transaction in your wallet", "success");
+      let mintSignature;
+      try {
+        mintSignature = await signer.signTypedData(domain, types, metaTxRequest);
+      } catch {
+        setStatus("NFT minting signature was rejected", "error");
+        setPreviewData(prev => ({
+          ...prev,
+          loading: false,
+          error: "NFT mint signature rejected"
+        }));
+        return;
+      }
+      
+      const tx = { ...metaTxRequest, signature: mintSignature };
+  
+      // 4. Relay meta-tx to backend
+      setStatus("Submitting NFT minting transaction to blockchain...", "success");
+      const relayRes = await fetch("/api/milestone/relay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          metaTx: tx,
+          type: "mintNFT"
+        }),
+      });
+      
+      if (!relayRes.ok) {
+        const errorData = await relayRes.json();
+        throw new Error(errorData?.error?.message || "Failed to relay NFT mint transaction");
+      }
+      
+      const result = await relayRes.json();
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error?.message || 'Failed to mint NFT');
+      if (!result.success) {
+        throw new Error(result.message || "Failed to mint NFT");
       }
 
-      const result = await response.json();
-      
+      const { txHash, blockNum } = result;
+
+      // Save NFT tokenId to Firestore for the user
+      setStatus("Saving NFT information...", "success");
+      try {
+        const saveTokenIdRes = await fetch("/api/nft/save-tokenid", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ txHash, blockNum }),
+        });
+        if (!saveTokenIdRes.ok) {
+          const errorData = await saveTokenIdRes.json();
+          console.error("Failed to save NFT tokenId:", errorData?.message || errorData?.error || saveTokenIdRes.statusText);
+        } else {
+          const { tokenId } = await saveTokenIdRes.json();
+          console.log("NFT tokenId saved:", tokenId);
+        }
+      } catch (err) {
+        console.error("Error calling save-tokenid endpoint:", err);
+      }
+
       // Show success notification
-      alert(`NFT minted successfully! Token ID: ${result.tokenId}...`);
+      setStatus("NFT minted successfully!", "success");
+      alert(`NFT minted successfully! Tx Hash: ${result.txHash}`);
       setPreviewData(prev => ({ ...prev, loading: false, visible: false }));
     } catch (error: any) {
       console.error('Error minting NFT:', error);
+      setStatus(`Error minting NFT: ${error.message}`, "error");
       setPreviewData(prev => ({
         ...prev,
         loading: false,
@@ -798,11 +1066,11 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
   // Get verification status badge
   const getVerificationBadge = (milestoneId: string) => {
     const status = verificationStatus[milestoneId];
-    
+
     if (!status) {
       return null;
     }
-    
+
     if (status.loading) {
       return (
         <div className="flex items-center mt-2">
@@ -811,7 +1079,7 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
         </div>
       );
     }
-    
+
     if (status.verified) {
       return (
         <div className="flex items-center mt-2">
@@ -822,7 +1090,7 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
         </div>
       );
     }
-    
+
     return (
       <div className="flex items-center mt-2">
         <svg className="w-4 h-4 text-red-500 mr-1" fill="currentColor" viewBox="0 0 20 20">
@@ -844,11 +1112,10 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
       <h1 className="text-3xl font-bold text-white mb-6">Shared Milestones</h1>
       {statusMessage && (
         <div
-          className={`p-3 rounded-md mb-4 ${
-            statusType === "success"
+          className={`p-3 rounded-md mb-4 ${statusType === "success"
               ? "bg-green-900/30 text-green-400"
               : "bg-red-900/30 text-red-400"
-          }`}
+            }`}
         >
           {statusMessage}
         </div>
@@ -959,7 +1226,7 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
 
           {hasOwnedMilestones && (
             <div className="mb-6 flex flex-wrap gap-4 items-center">
-              <button 
+              <button
                 onClick={verifyAllMilestones}
                 disabled={batchVerifying || !hasOwnedMilestones}
                 className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
@@ -973,7 +1240,7 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
                   <>Verify All Your Milestones</>
                 )}
               </button>
-              
+
               {batchResults && (
                 <div className="text-sm px-4 py-2 rounded-lg bg-[#252525] border border-purple-500/20">
                   <span className="text-gray-300">Results: </span>
@@ -1037,13 +1304,13 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
                       )}
                     </div>
                     {milestone.image && (
-                      <img 
+                      <img
                         src={
                           milestone.image.startsWith('http')
                             ? milestone.image
                             : `https://ipfs.io/ipfs/${milestone.image}`
                         }
-                        alt={milestone.description} 
+                        alt={milestone.description}
                         className="w-full h-40 object-cover rounded-md mb-2"
                         onError={(e) => { e.currentTarget.style.display = 'none'; }}
                       />
@@ -1061,9 +1328,9 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
                       ))}
                     </p>
                     <p className="text-gray-400">Created: {new Date(milestone.createdAt).toLocaleString('en-US')}</p>
-                    
+
                     {getVerificationBadge(milestone.id)}
-                    
+
                     <div className="mt-3 flex gap-2">
                       {milestone.owner === userId && !verificationStatus[milestone.id]?.loading && (
                         <button
@@ -1097,13 +1364,13 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
                       )}
                     </div>
                     {milestone.image && (
-                      <img 
+                      <img
                         src={
                           milestone.image.startsWith('http')
                             ? milestone.image
                             : `https://ipfs.io/ipfs/${milestone.image}`
                         }
-                        alt={milestone.description} 
+                        alt={milestone.description}
                         className="w-full h-40 object-cover rounded-md mb-2"
                         onError={(e) => { e.currentTarget.style.display = 'none'; }}
                       />
@@ -1155,13 +1422,13 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
                       <span className="bg-green-500/20 text-green-300 text-xs px-2 py-1 rounded-full">Signed by You</span>
                     </div>
                     {milestone.image && (
-                      <img 
+                      <img
                         src={
                           milestone.image.startsWith('http')
                             ? milestone.image
                             : `https://ipfs.io/ipfs/${milestone.image}`
                         }
-                        alt={milestone.description} 
+                        alt={milestone.description}
                         className="w-full h-40 object-cover rounded-md mb-2"
                         onError={(e) => { e.currentTarget.style.display = 'none'; }}
                       />
@@ -1180,9 +1447,9 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
                     </p>
                     <p className="text-gray-400">Created: {new Date(milestone.createdAt).toLocaleString('en-US')}</p>
                     {milestone.finalizedAt && <p className="text-gray-400">Finalized: {new Date(milestone.finalizedAt).toLocaleString('en-US')}</p>}
-                    
+
                     {getVerificationBadge(milestone.id)}
-                    
+
                     <div className="mt-3 flex gap-2">
                       {milestone.owner === userId && !verificationStatus[milestone.id]?.loading && (
                         <button
@@ -1221,7 +1488,7 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
                 </button>
 
                 <h3 className="text-xl font-bold text-white mb-4">Preview Image</h3>
-                
+
                 <div id="certificate-container" className="p-6 bg-[#1a1a1a] rounded-lg">
                   <div className="text-center mb-8">
                     <h2 className="text-2xl font-bold text-white mb-2">
@@ -1250,16 +1517,16 @@ const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
                     <div className="mt-4 bg-[#252525] p-4 rounded-lg flex flex-col items-center">
                       <p className="text-gray-400 text-sm mb-1 text-center">Participants</p>
                       <p className="text-white text-center">
-                      <>
-                        <span className="font-medium">{participantDetails[previewData.milestone.owner]?.username} </span>
-                        {(previewData.milestone.taggedFriendIds || []).length > 0 && <span className="mx-1">•</span>}
-                        {(previewData.milestone.taggedFriendIds || []).map((uid: string, i: number) => (
-                        <span key={uid}>
-                          {participantDetails[uid]?.username}
-                          {i < previewData.milestone.taggedFriendIds.length - 1 ? ', ' : ''}
-                        </span>
-                        ))}
-                      </>
+                        <>
+                          <span className="font-medium">{participantDetails[previewData.milestone.owner]?.username} </span>
+                          {(previewData.milestone.taggedFriendIds || []).length > 0 && <span className="mx-1">•</span>}
+                          {(previewData.milestone.taggedFriendIds || []).map((uid: string, i: number) => (
+                            <span key={uid}>
+                              {participantDetails[uid]?.username}
+                              {i < previewData.milestone.taggedFriendIds.length - 1 ? ', ' : ''}
+                            </span>
+                          ))}
+                        </>
                       </p>
                     </div>
                     <div className="mt-6 bg-[#252525] p-4 rounded-lg flex flex-col items-center">

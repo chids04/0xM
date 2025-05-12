@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { ethers } from "ethers";
 
 interface SubscriptionManagerProps {
-  walletAddress: string;
   currentUser: any;
 }
 
@@ -21,7 +21,8 @@ interface FeeDiscounts {
   tier2DiscountPercent: number;
 }
 
-export default function SubscriptionManager({ walletAddress, currentUser }: SubscriptionManagerProps) {
+export default function SubscriptionManager({ currentUser }: SubscriptionManagerProps) {
+  const [walletAddress, setWalletAddress] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
   const [currentSubscription, setCurrentSubscription] = useState<SubscriptionInfo>({
     tier: 'Free',
@@ -35,8 +36,28 @@ export default function SubscriptionManager({ walletAddress, currentUser }: Subs
   });
   const [status, setStatus] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
 
+  const setStatusMessage = (message: string, type: 'success' | 'error') => {
+    setStatus({ message, type });
+    setTimeout(() => setStatus(null), 5000);
+  };
+
+  useEffect(() => {
+    const getWalletAddress = async () => {
+      if (window.ethereum) {
+        let address = window.ethereum.selectedAddress;
+        if (!address) {
+          setStatusMessage("Please connect your wallet", "error");
+          return;
+        }
+        setWalletAddress(address);
+      }
+    };
+    getWalletAddress();
+  }, []);
+
   // Fetch subscription info
   useEffect(() => {
+    if (!walletAddress) return;
     const fetchSubscription = async () => {
       try {
         const response = await fetch('/api/wallet/subscription', {
@@ -54,7 +75,7 @@ export default function SubscriptionManager({ walletAddress, currentUser }: Subs
           });
         }
       } catch (error) {
-        setStatus({ message: "Could not load your subscription details", type: "error" });
+        setStatusMessage("Could not load your subscription details", "error");
       }
     };
     fetchSubscription();
@@ -77,7 +98,7 @@ export default function SubscriptionManager({ walletAddress, currentUser }: Subs
           });
         }
       } catch (error) {
-        setStatus({ message: "Could not load fee discounts", type: "error" });
+        setStatusMessage("Could not load fee discounts", "error");
       }
     };
     fetchDiscounts();
@@ -88,26 +109,91 @@ export default function SubscriptionManager({ walletAddress, currentUser }: Subs
     setStatus(null);
 
     try {
-      const response = await fetch('/api/wallet/subscribe', {
+      // 1. Get meta-tx details for subscribe
+      const subscribeTxRes = await fetch('/api/wallet/create-subscribe-tx', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          address: walletAddress,
+          fromAddress: walletAddress,
           tier: tier === 'Tier1' ? 1 : 2,
-          user: currentUser
-        })
+        }),
       });
+      if (!subscribeTxRes.ok) {
+        const errorData = await subscribeTxRes.json();
+        throw new Error(errorData?.error?.message || "Failed to create subscribe transaction");
+      }
+      const { metaTxRequest, domain, types, tierCost } = await subscribeTxRes.json();
 
-      const data = await response.json();
+      // 2. Request permit signature for subscription cost
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
 
-      if (!response.ok || !data.success) {
-        throw new Error(data.error?.message || data.message || 'Failed to subscribe');
+      const permitRes = await fetch("/api/transaction/make-permit-tx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userAddress: walletAddress,
+          amount: ethers.formatEther(tierCost),
+        }),
+      });
+      if (!permitRes.ok) {
+        const errorData = await permitRes.json();
+        throw new Error(errorData?.error?.message || "Failed to create permit transaction");
+      }
+      const permitData = await permitRes.json();
+      const { domain: permitDomain, types: permitTypes, message: permitMessage } = permitData;
+
+      setStatusMessage("Please approve the MST payment in your wallet.", "success");
+      let permitSignature;
+      try {
+        permitSignature = await signer.signTypedData(permitDomain, permitTypes, permitMessage);
+      } catch {
+        setStatusMessage("Permit signature rejected.", "error");
+        setIsLoading(false);
+        return;
       }
 
-      setStatus({
-        message: `Successfully subscribed to ${tier}!`,
-        type: 'success'
+      // 3. Send permit to backend
+      const permitTx = await fetch("/api/transaction/send-permit-tx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          payload: permitData,
+          signature: permitSignature,
+        }),
       });
+      if (!permitTx.ok) {
+        const errorData = await permitTx.json();
+        throw new Error(errorData?.error?.message || "Failed to send permit transaction");
+      }
+
+      // 4. User signs meta-tx for subscribe
+      setStatusMessage("Please sign the subscription transaction in your wallet.", "success");
+      let subscribeSignature;
+      try {
+        subscribeSignature = await signer.signTypedData(domain, types, metaTxRequest);
+      } catch {
+        setStatusMessage("Subscription signature rejected.", "error");
+        setIsLoading(false);
+        return;
+      }
+      const tx = { ...metaTxRequest, signature: subscribeSignature };
+
+      // 5. Relay meta-tx to backend
+      const relayRes = await fetch("/api/milestone/relay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          metaTx: tx,
+          type: "subscribe",
+        }),
+      });
+      if (!relayRes.ok) {
+        const errorData = await relayRes.json();
+        throw new Error(errorData?.error?.message || "Failed to relay subscription transaction");
+      }
+
+      setStatusMessage(`Successfully subscribed to ${tier}!`, 'success');
 
       // Refetch subscription info to update UI
       const subRes = await fetch('/api/wallet/subscription', {
@@ -125,13 +211,9 @@ export default function SubscriptionManager({ walletAddress, currentUser }: Subs
         });
       }
     } catch (error: any) {
-      setStatus({
-        message: error.message || 'Failed to subscribe',
-        type: 'error'
-      });
+      setStatusMessage(error.message || 'Failed to subscribe', 'error');
     } finally {
       setIsLoading(false);
-      setTimeout(() => setStatus(null), 5000);
     }
   };
 
@@ -178,8 +260,8 @@ export default function SubscriptionManager({ walletAddress, currentUser }: Subs
               {currentSubscription.tier === "Tier1"
                 ? feeDiscounts.tier1DiscountPercent
                 : currentSubscription.tier === "Tier2"
-                ? feeDiscounts.tier2DiscountPercent
-                : 0
+                  ? feeDiscounts.tier2DiscountPercent
+                  : 0
               }%
             </p>
             {currentSubscription.lastReset && (
@@ -187,6 +269,9 @@ export default function SubscriptionManager({ walletAddress, currentUser }: Subs
                 <span className="text-gray-400">Resets on:</span> {new Date(currentSubscription.lastReset.getTime() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString()}
               </p>
             )}
+            <p className="text-xs text-gray-500 break-all">
+              <span className="font-semibold">Wallet:</span> {walletAddress}
+            </p>
           </div>
         </CardContent>
       </Card>
@@ -214,11 +299,10 @@ export default function SubscriptionManager({ walletAddress, currentUser }: Subs
             <Button
               onClick={() => handleSubscribe('Tier1')}
               disabled={isLoading || currentSubscription.tier === 'Tier1'}
-              className={`w-full ${
-                currentSubscription.tier === 'Tier1'
+              className={`w-full ${currentSubscription.tier === 'Tier1'
                   ? 'bg-green-800/20 text-green-400 cursor-not-allowed'
                   : 'bg-purple-600 hover:bg-purple-700 text-white'
-              }`}
+                }`}
             >
               {currentSubscription.tier === 'Tier1'
                 ? 'Current Plan'
@@ -249,11 +333,10 @@ export default function SubscriptionManager({ walletAddress, currentUser }: Subs
             <Button
               onClick={() => handleSubscribe('Tier2')}
               disabled={isLoading || currentSubscription.tier === 'Tier2'}
-              className={`w-full ${
-                currentSubscription.tier === 'Tier2'
+              className={`w-full ${currentSubscription.tier === 'Tier2'
                   ? 'bg-green-800/20 text-green-400 cursor-not-allowed'
                   : 'bg-purple-600 hover:bg-purple-700 text-white'
-              }`}
+                }`}
             >
               {currentSubscription.tier === 'Tier2'
                 ? 'Current Plan'
@@ -264,11 +347,10 @@ export default function SubscriptionManager({ walletAddress, currentUser }: Subs
       </div>
 
       {status && (
-        <div className={`p-3 rounded-md ${
-          status.type === 'success'
+        <div className={`p-3 rounded-md ${status.type === 'success'
             ? 'bg-green-900/30 text-green-400'
             : 'bg-red-900/30 text-red-400'
-        }`}>
+          }`}>
           {status.message}
         </div>
       )}

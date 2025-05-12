@@ -2,35 +2,21 @@ import type { APIRoute } from "astro";
 import { app } from "../../../firebase/server";
 import { getFirestore } from "firebase-admin/firestore";
 import { getAuth } from "firebase-admin/auth";
-import { ethers } from "ethers";
-import { readFileSync } from "fs";
-import { join } from "path";
-import { fileURLToPath } from "url";
-import { dirname } from "path";
+import { create as createIpfsClient } from "ipfs-http-client";
+import { nftContract } from "@/utils/contracts";
+
+const ipfs = createIpfsClient({ url: "http://127.0.0.1:5001" });
 
 export const GET: APIRoute = async ({ url, cookies }) => {
   try {
-    // Get user ID from query parameter
-    const userId = url.searchParams.get('userId');
-    if (!userId) {
-      return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: { code: "MISSING_PARAMETER", message: "User ID is required" } 
-        }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
     // Authenticate user with session cookie
     const auth = getAuth(app);
     const sessionCookie = cookies.get("__session")?.value;
-    
     if (!sessionCookie) {
       return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: { code: "AUTH_ERROR", message: "Unauthorized" } 
+        JSON.stringify({
+          success: false,
+          error: { code: "AUTH_ERROR", message: "Unauthorized" }
         }),
         { status: 401, headers: { "Content-Type": "application/json" } }
       );
@@ -42,163 +28,143 @@ export const GET: APIRoute = async ({ url, cookies }) => {
       decodedCookie = await auth.verifySessionCookie(sessionCookie);
     } catch (error) {
       return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: { code: "AUTH_ERROR", message: "Invalid session" } 
+        JSON.stringify({
+          success: false,
+          error: { code: "AUTH_ERROR", message: "Invalid session" }
         }),
         { status: 401, headers: { "Content-Type": "application/json" } }
       );
     }
 
-    // Initialize Firebase services
+    const userId = decodedCookie.uid;
     const db = getFirestore(app);
 
-    // Get user's wallet address
-    let userWalletAddress;
-    try {
-      const walletDoc = await db
-        .collection("users")
-        .doc(userId)
-        .collection("wallet")
-        .doc("wallet_info")
-        .get();
+    // Get user's NFT token IDs from Firestore
+    const nftDoc = await db.collection("users").doc(userId).collection("nft").doc("tokenIDs").get();
+    const tokenIDs: string[] = nftDoc.exists && Array.isArray(nftDoc.data()?.tokenIDs) ? nftDoc.data()!.tokenIDs : [];
 
-      if (!walletDoc.exists) {
-        return new Response(
-          JSON.stringify({ 
-            success: false, 
-            error: { code: "WALLET_ERROR", message: "User wallet not found" } 
-          }),
-          { status: 400, headers: { "Content-Type": "application/json" } }
-        );
-      }
-
-      userWalletAddress = walletDoc.data()?.publicKey;
-      if (!userWalletAddress) {
-        return new Response(
-          JSON.stringify({ 
-            success: false, 
-            error: { code: "WALLET_ERROR", message: "User wallet address not found" } 
-          }),
-          { status: 400, headers: { "Content-Type": "application/json" } }
-        );
-      }
-      
-      console.log(`User wallet address: ${userWalletAddress}`);
-    } catch (error) {
-      console.error("Error retrieving wallet address:", error);
+    if (!tokenIDs.length) {
       return new Response(
-        JSON.stringify({ 
-          success: false,
-          error: { code: "WALLET_ERROR", message: "Failed to retrieve user wallet" } 
-        }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
+        JSON.stringify({ success: true, nfts: [] }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
       );
     }
 
-    // Load blockchain configuration
-    const nftContractAddress = import.meta.env.MILESTONE_NFT_ADDRESS;
-    const nftABI = import.meta.env.MILESTONE_NFT_ABI;
-    
-    if (!nftContractAddress || !nftABI) {
-      return new Response(
-        JSON.stringify({ 
-          success: false,
-          error: { code: "CONFIG_ERROR", message: "Missing contract configuration" } 
-        }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
-      );
-    }
+    // For each tokenId, get tokenURI and fetch metadata from local IPFS
+    const nfts = await Promise.all(tokenIDs.map(async (tokenId) => {
+      try {
+        const tokenURI = await nftContract.tokenURI(tokenId);
+        let metadata = null;
+        let ipfsError = false;
 
-    // Load NFT contract ABI
-    let nft_abi;
-    try {
-      const __filename = fileURLToPath(import.meta.url);
-      const __dirname = dirname(__filename);
-      const projectRoot = join(__dirname, "../../../../blockchain");
-      const nftArtifact = JSON.parse(readFileSync(join(projectRoot, nftABI), "utf8"));
-      nft_abi = nftArtifact.abi;
-    } catch (error) {
-      return new Response(
-        JSON.stringify({ 
-          success: false,
-          error: { code: "BLOCKCHAIN_ERROR", message: "Failed to load contract ABI" } 
-        }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    // Initialize blockchain provider and contract
-    const provider = new ethers.JsonRpcProvider(
-      import.meta.env.ETHEREUM_RPC_URL || "http://localhost:8545"
-    );
-    const nftContract = new ethers.Contract(nftContractAddress, nft_abi, provider);
-
-    // Query Firestore for all milestones with NFTs (may include others' milestones)
-    // This approach lets us find NFTs transferred to this user
-    const milestonesWithNFTsQuery = db.collection("milestones")
-      .where("nftOwnedBy", "==", userWalletAddress)
-      .limit(50); // Add a reasonable limit
-      
-    const milestonesWithNFTsSnapshot = await milestonesWithNFTsQuery.get();
-    
-    let nfts = [];
-    
-    if (!milestonesWithNFTsSnapshot.empty) {
-      // Process milestones that have NFTs owned by this user
-      const nftPromises = milestonesWithNFTsSnapshot.docs.map(async (doc) => {
-        const milestone = { id: doc.id, ...(doc.data() as { nftTokenId?: string; nftImageUrl?: string; nftMintedAt?: any }) };
-        
-        // Skip if no tokenId (shouldn't happen with our query, but just in case)
-        if (!milestone.nftTokenId) return null;
-        
-        try {
-          // Get NFT metadata from smart contract
-          const [milestoneId, imageUrl] = await nftContract.getNFTMetadata(milestone.nftTokenId);
-          
-          return {
-            tokenId: milestone.nftTokenId,
-            milestoneId: milestone.id,
-            nftImageUrl: imageUrl,
-            mintedAt: milestone.nftMintedAt ? 
-              new Date(milestone.nftMintedAt.toDate()).toISOString() : 
-              undefined,
-          };
-        } catch (error) {
-          console.error(`Failed to get NFT data for token ${milestone.nftTokenId}:`, error);
-          
-          // Fallback to the image URL in the milestone if available
-          if (milestone.nftImageUrl) {
-            return {
-              tokenId: milestone.nftTokenId,
-              milestoneId: milestone.id,
-              nftImageUrl: milestone.nftImageUrl,
-              mintedAt: milestone.nftMintedAt ? 
-                new Date(milestone.nftMintedAt.toDate()).toISOString() : 
-                undefined,
-            };
+        if (tokenURI.startsWith("ipfs://")) {
+          try {
+            const cid = tokenURI.replace("ipfs://", "");
+            // Read from local IPFS node with timeout
+            const chunks: Uint8Array[] = [];
+            const timeoutController = new AbortController();
+            const timeoutId = setTimeout(() => timeoutController.abort(), 3000); // 3 second timeout
+            
+            try {
+              for await (const chunk of ipfs.cat(cid, { signal: timeoutController.signal })) {
+                chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+              }
+              const buffer = Buffer.concat(chunks);
+              metadata = JSON.parse(buffer.toString("utf-8"));
+              clearTimeout(timeoutId);
+            } catch (ipfsError) {
+              console.warn(`IPFS timeout or error for tokenId ${tokenId}:`, ipfsError);
+              ipfsError = true;
+              // Fallback to gateway
+              const fallbackRes = await fetch(`https://ipfs.io/ipfs/${cid}`);
+              if (fallbackRes.ok) {
+                metadata = await fallbackRes.json();
+                ipfsError = false;
+              } else {
+                throw new Error("Both IPFS node and gateway failed");
+              }
+            }
+          } catch (e) {
+            ipfsError = true;
+            console.error(`IPFS fetch error for token ${tokenId}:`, e);
           }
-          
-          return null;
+        } else {
+          // fallback to fetch if not ipfs
+          try {
+            const metaRes = await fetch(tokenURI);
+            if (!metaRes.ok) throw new Error("Failed to fetch metadata from URI");
+            metadata = await metaRes.json();
+          } catch (e) {
+            ipfsError = true;
+            console.error(`HTTP fetch error for token ${tokenId}:`, e);
+          }
         }
-      });
-      
-      nfts = (await Promise.all(nftPromises)).filter(nft => nft !== null);
-    }
-    
-    console.log(`Found ${nfts.length} NFTs owned by user's wallet ${userWalletAddress}`);
-    
+
+        // Format image URL for frontend display
+        let nftImageUrl = "";
+        if (metadata?.image && typeof metadata.image === "string") {
+          if (metadata.image.startsWith("ipfs://")) {
+            // Use both gateway URLs for better availability
+            const imageCid = metadata.image.replace("ipfs://", "");
+            nftImageUrl = `https://ipfs.io/ipfs/${imageCid}`;
+            
+            // Check if the image is accessible
+            try {
+              const imageCheck = await fetch(nftImageUrl, { method: 'HEAD' });
+              if (!imageCheck.ok) {
+                // Try Cloudflare IPFS gateway as fallback
+                nftImageUrl = `https://cloudflare-ipfs.com/ipfs/${imageCid}`;
+                ipfsError = true;
+              }
+            } catch (e) {
+              // If checking fails, still use ipfs.io but mark as having issues
+              ipfsError = true;
+            }
+          } else {
+            nftImageUrl = metadata.image;
+          }
+        } else {
+          // Missing image in metadata
+          nftImageUrl = "/default-nft-image.svg"; // Fallback image
+          ipfsError = true;
+        }
+
+        return {
+          tokenId,
+          tokenURI,
+          name: metadata?.name || "",
+          description: metadata?.description || "",
+          milestoneId: metadata?.milestoneId || "",
+          nftImageUrl,
+          mintedAt: metadata?.mintedAt || null,
+          ipfsError, // Flag indicating if there were IPFS loading issues
+          metadata
+        };
+      } catch (err) {
+        console.error(`Failed to fetch NFT metadata for tokenId ${tokenId}:`, err);
+        // Return minimal NFT info with error flag instead of null
+        return {
+          tokenId,
+          tokenURI: "",
+          milestoneId: `Unknown milestone (ID: ${tokenId})`,
+          nftImageUrl: "/default-nft-image.svg", // Fallback image
+          ipfsError: true
+        };
+      }
+    }));
+
+    const filteredNfts = nfts.filter(Boolean);
+
     return new Response(
-      JSON.stringify({ success: true, nfts }),
+      JSON.stringify({ success: true, nfts: filteredNfts }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
-    
   } catch (error) {
     console.error("Error fetching user NFTs:", error);
     return new Response(
-      JSON.stringify({ 
+      JSON.stringify({
         success: false,
-        error: { code: "SERVER_ERROR", message: "Failed to fetch NFTs" } 
+        error: { code: "SERVER_ERROR", message: "Failed to fetch NFTs" }
       }),
       { status: 500, headers: { "Content-Type": "application/json" } }
     );

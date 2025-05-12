@@ -130,7 +130,7 @@ export function WalletCreationModal({ userId }: WalletCreationModalProps) {
       const res = await fetch("/api/wallet/airdrop", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ address }),
+        body: JSON.stringify({ address: addr }),
       });
 
       if (!res.ok) {
