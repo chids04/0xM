@@ -16,9 +16,9 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
   const [searchTerm, setSearchTerm] = useState('');
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const containerRef = useRef<HTMLDivElement>(null);
-  // Add a ref to store refs for each milestone card
+  // add a ref to store refs for each milestone card
   const milestoneRefs = useRef<Array<HTMLDivElement | null>>([]);
-  // State to store measured heights
+  // state to store measured heights
   const [milestoneHeights, setMilestoneHeights] = useState<number[]>([]);
   const [isMobile, setIsMobile] = useState(false);
   const [currentUsername, setCurrentUsername] = useState<string | null>(null);
@@ -27,12 +27,12 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
 
-  // Verification states
+  // verification states
   const [verificationStatus, setVerificationStatus] = useState<Record<string, { verified: boolean, loading: boolean, error?: string }>>({});
   const [batchVerifying, setBatchVerifying] = useState(false);
   const [batchResults, setBatchResults] = useState<{ total: number, verified: number, failed: number } | null>(null);
 
-  // Preview modal state
+  // preview modal state
   const [previewData, setPreviewData] = useState<{
     visible: boolean;
     milestone: any | null;
@@ -50,7 +50,7 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
   const [nftPriceLoading, setNftPriceLoading] = useState(true);
   const [nftPriceError, setNftPriceError] = useState<string | null>(null);
   
-  // Helper function for setting status messages
+  // helper function for setting status messages
   const setStatus = (msg: string, type: "success" | "error" = "error") => {
     setStatusMessage(msg);
     setStatusType(type);
@@ -60,7 +60,7 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
     }, 5000);
   };
   
-  // Check for mobile screen size
+  // check for mobile screen size
   useEffect(() => {
     const checkScreenSize = () => {
       setIsMobile(window.innerWidth < 768);
@@ -96,7 +96,7 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
   }, []);
 
 
-  // Fetch milestones from Firebase
+  // fetch milestones from firebase
   useEffect(() => {
     const db = getFirestore(app);
     const auth = getAuth(app);
@@ -114,7 +114,7 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
       }
     });
     
-    // Helper function to fetch with timeout
+    // helper function to fetch with timeout
     const fetchWithTimeout = async (url: string, timeoutMs = 10000) => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -157,22 +157,22 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
         
         setStatus(`Loading ${milestoneRefs.length} milestones...`, "success");
         
-        // Fetch milestone Firestore docs
+        // fetch milestone firestore docs
         const milestonesDataPromises = milestoneRefs.map(async (ref: any, index: number) => {
           try {
-            // ref is a DocumentReference
+            // ref is a documentreference
             const milestoneSnapshot = await getDoc(ref);
             if (!milestoneSnapshot.exists()) return null;
             
             const milestoneDocData = milestoneSnapshot.data();
-            // Only include if owner matches current userId
+            // only include if owner matches current userid
             if (!milestoneDocData?.owner || milestoneDocData.owner !== userId) return null;
             
-            // Get IPFS CID from milestoneDocData
+            // get ipfs cid from milestonedocdata
             const metadataCid = milestoneDocData?.ipfsCIDs?.metadataCid;
             if (!metadataCid) return null;
 
-            // Fetch milestone data from IPFS with timeout
+            // fetch milestone data from ipfs with timeout
             const ipfsUrl = `https://ipfs.io/ipfs/${metadataCid}`;
             try {
               const ipfsResponse = await fetchWithTimeout(ipfsUrl, 10000); // 10 second timeout
@@ -180,7 +180,7 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
               if (!ipfsResponse.ok) {
                 console.error("Failed to fetch milestone data from IPFS:", ipfsUrl);
                 
-                // Return partial data if IPFS fetch fails
+                // return partial data if ipfs fetch fails
                 return {
                   id: milestoneSnapshot.id,
                   description: `Milestone ${index + 1} (IPFS data unavailable)`,
@@ -193,7 +193,7 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
               
               const ipfsData = await ipfsResponse.json();
 
-              // Merge Firestore doc data (for id, owner, etc.) with IPFS data
+              // merge firestore doc data for id owner etc with ipfs data
               return {
                 id: milestoneSnapshot.id,
                 ...ipfsData,
@@ -202,7 +202,7 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
             } catch (ipfsError) {
               console.error("Error or timeout fetching from IPFS:", ipfsError);
               
-              // Return partial data if IPFS fetch times out
+              // return partial data if ipfs fetch times out
               return {
                 id: milestoneSnapshot.id,
                 description: `Milestone ${index + 1} (IPFS data unavailable)`,
@@ -250,22 +250,89 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
     return () => {
       unsubscribe();
     };
-  }, [userId]);
-
-  // Measure milestone card heights after render
+  }, [userId]);  // measure milestone card heights after render with improved image handling
   useEffect(() => {
     if (!filteredMilestones.length) {
       setMilestoneHeights([]);
       return;
     }
-    const heights = filteredMilestones.map((_, idx) => {
-      const el = milestoneRefs.current[idx];
-      return el ? el.offsetHeight : 180; // fallback to 180 if not rendered yet
+    
+    // function to measure heights properly
+    const measureHeights = () => {
+      const heights = filteredMilestones.map((_, idx) => {
+        const el = milestoneRefs.current[idx];
+        return el ? el.offsetHeight : 220; // increased fallback height
+      });
+      setMilestoneHeights(heights);
+    };
+
+    // initial measurement
+    measureHeights();
+    
+    // perform multiple measurements to catch different loading phases
+    const measurementTimers = [
+      setTimeout(measureHeights, 100),
+      setTimeout(measureHeights, 500),
+      setTimeout(measureHeights, 1000),
+      setTimeout(measureHeights, 2000)
+    ];
+    
+    // monitor for image loads within milestone cards
+    const imageLoadHandler = () => {
+      measureHeights();
+      // schedule another measurement after a short delay to account for layout changes
+      setTimeout(measureHeights, 50);
+    };
+    
+    // create mutationobserver to watch for dom changes within milestone cards
+    const observer = new MutationObserver((mutations) => {
+      let hasRelevantChanges = false;
+      mutations.forEach(mutation => {
+        if (mutation.type === 'childList' || mutation.type === 'attributes') {
+          hasRelevantChanges = true;
+        }
+      });
+      
+      if (hasRelevantChanges) {
+        measureHeights();
+      }
     });
-    setMilestoneHeights(heights);
+    
+    // observe each milestone card for changes
+    milestoneRefs.current.forEach(ref => {
+      if (ref) {
+        observer.observe(ref, { 
+          childList: true, 
+          subtree: true, 
+          attributes: true,
+          attributeFilter: ['src', 'style', 'class']
+        });
+      }
+    });
+    
+    // add event listeners to all images in milestone cards
+    const images = document.querySelectorAll('.milestone-card img');
+    images.forEach(img => {
+      img.addEventListener('load', imageLoadHandler);
+      img.addEventListener('error', imageLoadHandler);
+      
+      // if image is already loaded trigger measurement
+      if ((img as HTMLImageElement).complete) {
+        imageLoadHandler();
+      }
+    });
+    
+    return () => {
+      measurementTimers.forEach(timer => clearTimeout(timer));
+      observer.disconnect();
+      images.forEach(img => {
+        img.removeEventListener('load', imageLoadHandler);
+        img.removeEventListener('error', imageLoadHandler);
+      });
+    };
   }, [filteredMilestones]);
 
-  // Update card positions
+  // update card positions
   useLayoutEffect(() => {
     const updatePositions = () => {
       if (!containerRef.current || filteredMilestones.length === 0) return;
@@ -278,13 +345,18 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
       if (containerWidth === 0 || containerHeight === 0) {
         return;
       }
-
+      
+      // get the safety margin to prevent overlap
+      // this adds extra spacing between cards to prevent overlap issues
+      const safetyMargin = 30;
+      
       if (window.innerWidth < 768) {
-        // Use measured heights to prevent overlap
+        // use measured heights to prevent overlap  mobile view vertical layout
         let currentTop = 0;
-        const gap = 20;
+        const gap = 30; // increased gap for better separation
         milestoneElements.forEach((milestone, i) => {
-          const height = milestoneHeights[i] || 180;
+          // Use measured height with a minimum fallback
+          const height = Math.max(milestoneHeights[i] || 220, 220) + safetyMargin;
           (milestone as HTMLElement).style.top = `${currentTop}px`;
           (milestone as HTMLElement).style.left = '50%';
           currentTop += height + gap;
@@ -292,16 +364,22 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
       } else {
         const maxAmplitude = containerWidth * 0.3;
         const amplitude = Math.min(maxAmplitude, Math.max(20, (window.innerWidth - 480) / 4));
-        // Use measured heights for vertical positioning
+        // Use measured heights for vertical positioning - desktop view (sine wave layout)
         let currentTop = 0;
-        const gap = 20;
+        const gap = 40; // Increased gap for better separation
+        
         milestoneElements.forEach((milestone, idx) => {
-          const height = milestoneHeights[idx] || 180;
+          // Use measured height with a minimum fallback and safety margin
+          const height = Math.max(milestoneHeights[idx] || 220, 220) + safetyMargin;
           const sinePosition = totalMilestones > 1 ? (idx / (totalMilestones - 1)) * Math.PI * 3 : 0;
           const horizontalOffset = Math.sin(sinePosition) * amplitude;
           const horizontalPos = 0.5 + horizontalOffset / containerWidth;
-          (milestone as HTMLElement).style.top = `${currentTop + height / 2}px`;
+          
+          // Position card from the top, not from center
+          (milestone as HTMLElement).style.top = `${currentTop}px`;
           (milestone as HTMLElement).style.left = `${horizontalPos * 100}%`;
+          
+          // Move to next position with height + gap
           currentTop += height + gap;
         });
       }
@@ -839,14 +917,12 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
         </div>
       )}
 
-      {/* Timeline Container */}
-      <div
+      {/* Timeline Container */}      <div
         className="relative w-full my-10"
         style={{ height: `${containerHeight}px` }}
         ref={containerRef}
       >
         <div className="hidden lg:block absolute top-0 left-1/2 h-full w-0.5 bg-purple-500/30 transform -translate-x-1/2"></div>
-
         <div className="milestone-container">
           {filteredMilestones.map((milestone, index) => (
             <div
@@ -855,6 +931,8 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
               data-index={index}
               // Attach ref for measuring height
               ref={el => milestoneRefs.current[index] = el}
+              // Add explicit vertical positioning to prevent overlap during initial render
+              style={{ top: `${index * (250 + 40)}px` }}
             >
               <div
                 className={`bg-[#1a1a1a] p-6 rounded-xl shadow-lg border border-purple-500/20 transition-all duration-300 ${

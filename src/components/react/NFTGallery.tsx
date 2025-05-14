@@ -4,13 +4,12 @@ import { TagFriendDropdown } from "./TagFriendDropdown";
 import type { Friend } from "./ClientTagFriendDropdown";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { ethers } from 'ethers';
 
 interface NFTGalleryProps {
   userId: string;
   friends: Friend[];
 }
-
-
 
 interface NFT {
   tokenId: number;
@@ -20,6 +19,11 @@ interface NFT {
   description?: string;
   name?: string;
   ipfsError?: boolean; // Flag to indicate if there was an IPFS loading issue
+}
+
+interface ContractInfo {
+  address: string;
+  abi: any[];
 }
 
 export function NFTGallery({ userId, friends }: NFTGalleryProps) {
@@ -37,6 +41,49 @@ export function NFTGallery({ userId, friends }: NFTGalleryProps) {
   const [selectedFriend, setSelectedFriend] = useState<Friend | null>(null);
   const [transferFee, setTransferFee] = useState<string>("5.0");
   const [isFeeLoading, setIsFeeLoading] = useState<boolean>(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [statusType, setStatusType] = useState<"success" | "error" | null>(null);
+  const [contractInfo, setContractInfo] = useState<ContractInfo | null>(null);
+  const [contractLoading, setContractLoading] = useState<boolean>(true);
+
+  // Helper function for setting status messages
+  const setStatus = (msg: string, type: "success" | "error" = "error") => {
+    setStatusMessage(msg);
+    setStatusType(type);
+    
+    // Auto-clear status message after 5 seconds
+    setTimeout(() => {
+      setStatusMessage(null);
+      setStatusType(null);
+    }, 5000);
+  };
+
+  // Fetch NFT contract info
+  useEffect(() => {
+    const fetchContractInfo = async () => {
+      try {
+        setContractLoading(true);
+        const response = await fetch('/api/contract-info?contract=nft');
+        
+        if (!response.ok) {
+          throw new Error('Failed to fetch NFT contract info');
+        }
+        
+        const data = await response.json();
+        setContractInfo({
+          address: data.address,
+          abi: data.abi
+        });
+      } catch (err) {
+        console.error("Failed to fetch contract info:", err);
+        setError("Failed to load NFT contract information. Please try again later.");
+      } finally {
+        setContractLoading(false);
+      }
+    };
+    
+    fetchContractInfo();
+  }, []);
 
   useEffect(() => {
     const fetchNFTs = async () => {
@@ -179,6 +226,7 @@ export function NFTGallery({ userId, friends }: NFTGalleryProps) {
     setTransferError(null);
   };
 
+  // Direct transfer using user's wallet
   const handleTransferNFT = async () => {
     // Validate input
     if (!transferToAddress) {
@@ -191,28 +239,68 @@ export function NFTGallery({ userId, friends }: NFTGalleryProps) {
       return;
     }
     
+    if (!contractInfo) {
+      setTransferError("Contract information not loaded");
+      return;
+    }
+    
     setTransferLoading(true);
     setTransferError(null);
     setTransferSuccess(null);
     
     try {
-      const response = await fetch('/api/nft/transfer', {
+      setStatus("Please connect your wallet to transfer the NFT...", "success");
+      
+      // Check if MetaMask is installed
+      if (!window.ethereum || !window.ethereum.selectedAddress) {
+        throw new Error("Please connect to your wallet");
+      }
+      
+      const userAddress = window.ethereum.selectedAddress;
+
+      // Create contract instance
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+      const nftContract = new ethers.Contract(
+        contractInfo.address,
+        contractInfo.abi,
+        signer
+      );
+      
+      // Verify ownership of the NFT
+      const owner = await nftContract.ownerOf(selectedNFT.tokenId);
+      if (owner.toLowerCase() !== userAddress.toLowerCase()) {
+        throw new Error("You are not the owner of this NFT");
+      }
+      
+      // Execute transfer
+      setStatus("Please confirm the transfer transaction in your wallet...", "success");
+      const tx = await nftContract.transferFrom(
+        userAddress,
+        transferToAddress,
+        selectedNFT.tokenId
+      );
+      
+      setStatus("Transaction submitted. Waiting for confirmation...", "success");
+      
+      // Wait for transaction to be confirmed
+      await tx.wait();
+      
+      setTransferSuccess(`Successfully transferred NFT #${selectedNFT.tokenId} to ${selectedFriend ? selectedFriend.displayName : transferToAddress}`);
+      setStatus("NFT transferred successfully!", "success");
+      
+      // Update backend about the transfer
+      await fetch('/api/nft/record-transfer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tokenId: selectedNFT.tokenId,
-          recipientAddress: transferToAddress,
+          fromAddress: userAddress,
+          toAddress: transferToAddress,
+          txHash: tx.hash,
           userId
         })
       });
-      
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.error?.message || 'Failed to transfer NFT');
-      }
-      
-      setTransferSuccess(`Successfully transferred NFT #${selectedNFT.tokenId} to ${selectedFriend ? selectedFriend.displayName : transferToAddress}`);
       
       // Refresh NFT list after successful transfer
       setTimeout(async () => {
@@ -229,12 +317,13 @@ export function NFTGallery({ userId, friends }: NFTGalleryProps) {
     } catch (error: any) {
       console.error('Error transferring NFT:', error);
       setTransferError(error.message || 'Failed to transfer NFT');
+      setStatus(`Error: ${error.message || 'Failed to transfer NFT'}`, "error");
     } finally {
       setTransferLoading(false);
     }
   };
 
-  if (loading) {
+  if (loading || contractLoading) {
     return (
       <div className="flex justify-center items-center h-64">
         <div 
@@ -273,6 +362,26 @@ export function NFTGallery({ userId, friends }: NFTGalleryProps) {
 
   return (
     <div className="container mx-auto">
+      {/* Status Message */}
+      {statusMessage && (
+        <div className={`mb-6 p-4 rounded-lg flex items-center ${
+          statusType === "error" 
+            ? "bg-red-900/30 border border-red-500/30 text-red-400" 
+            : "bg-green-900/30 border border-green-500/30 text-green-400"
+        }`}>
+          {statusType === "error" ? (
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+            </svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+            </svg>
+          )}
+          {statusMessage}
+        </div>
+      )}
+      
       {/* IPFS Loading Issue Banner */}
       {ipfsLoadingIssue && (
         <div className="mb-6 p-4 bg-amber-900/30 border border-amber-500/30 rounded-lg">
@@ -527,18 +636,19 @@ export function NFTGallery({ userId, friends }: NFTGalleryProps) {
                         </p>
                       </div>
                       
-                      {/* Fee information */}
-                      <div className="mt-4 p-3 bg-[#1a1a1a] rounded-md">
-                        <div className="flex justify-between items-center text-sm">
-                          <span className="text-gray-400">Transfer Fee:</span>
-                          <span className="text-white">
-                            {isFeeLoading ? 
-                              <span className="inline-block w-6 h-3 bg-gray-600 animate-pulse rounded"></span> : 
-                              `${transferFee} MST`}
-                          </span>
+                      {/* Gas fee information */}
+                      <div className="mt-4 p-3 bg-[#1a1a1a] border border-amber-500/20 rounded-md">
+                        <div className="flex items-center mb-2">
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-amber-400 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2h-1V9a1 1 0 00-1-1z" clipRule="evenodd" />
+                          </svg>
+                          <span className="text-amber-400 font-medium">Direct Transfer Information</span>
                         </div>
-                        <p className="text-xs text-gray-500 mt-1">
-                          Fee is charged in MST tokens and will be deducted from your wallet
+                        <p className="text-sm text-gray-300 mb-1">
+                          This transfer will be executed directly from your wallet.
+                        </p>
+                        <p className="text-sm text-gray-400">
+                          You'll need to pay gas fees in ETH using your connected MetaMask wallet.
                         </p>
                       </div>
                     </div>

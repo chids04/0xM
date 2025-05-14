@@ -56,6 +56,7 @@ export const GET: APIRoute = async ({ url, cookies }) => {
         const tokenURI = await nftContract.tokenURI(tokenId);
         let metadata = null;
         let ipfsError = false;
+        console.log(`Fetching metadata for tokenId ${tokenId} from URI: ${tokenURI}`);
 
         if (tokenURI.startsWith("ipfs://")) {
           try {
@@ -63,7 +64,7 @@ export const GET: APIRoute = async ({ url, cookies }) => {
             // Read from local IPFS node with timeout
             const chunks: Uint8Array[] = [];
             const timeoutController = new AbortController();
-            const timeoutId = setTimeout(() => timeoutController.abort(), 3000); // 3 second timeout
+            const timeoutId = setTimeout(() => timeoutController.abort(), 5000); // 5 second timeout
             
             try {
               for await (const chunk of ipfs.cat(cid, { signal: timeoutController.signal })) {
@@ -75,12 +76,23 @@ export const GET: APIRoute = async ({ url, cookies }) => {
             } catch (ipfsError) {
               console.warn(`IPFS timeout or error for tokenId ${tokenId}:`, ipfsError);
               ipfsError = true;
-              // Fallback to gateway
-              const fallbackRes = await fetch(`https://ipfs.io/ipfs/${cid}`);
-              if (fallbackRes.ok) {
-                metadata = await fallbackRes.json();
-                ipfsError = false;
-              } else {
+              // Fallback to gateway with timeout
+              const fallbackController = new AbortController();
+              const fallbackTimeoutId = setTimeout(() => fallbackController.abort(), 5000); // 5 second timeout
+              
+              try {
+                const fallbackRes = await fetch(`https://ipfs.io/ipfs/${cid}`, { 
+                  signal: fallbackController.signal 
+                });
+                if (fallbackRes.ok) {
+                  metadata = await fallbackRes.json();
+                  ipfsError = false;
+                } else {
+                  throw new Error("Both IPFS node and gateway failed");
+                }
+                clearTimeout(fallbackTimeoutId);
+              } catch (fallbackError) {
+                console.error(`Gateway timeout for tokenId ${tokenId}:`, fallbackError);
                 throw new Error("Both IPFS node and gateway failed");
               }
             }
@@ -91,7 +103,15 @@ export const GET: APIRoute = async ({ url, cookies }) => {
         } else {
           // fallback to fetch if not ipfs
           try {
-            const metaRes = await fetch(tokenURI);
+            const httpController = new AbortController();
+            const httpTimeoutId = setTimeout(() => httpController.abort(), 5000); // 5 second timeout
+            
+            const metaRes = await fetch(tokenURI, { 
+              signal: httpController.signal 
+            });
+            
+            clearTimeout(httpTimeoutId);
+            
             if (!metaRes.ok) throw new Error("Failed to fetch metadata from URI");
             metadata = await metaRes.json();
           } catch (e) {
@@ -102,22 +122,34 @@ export const GET: APIRoute = async ({ url, cookies }) => {
 
         // Format image URL for frontend display
         let nftImageUrl = "";
+        console.log(`Metadata for tokenId ${tokenId}:`, metadata);
         if (metadata?.image && typeof metadata.image === "string") {
           if (metadata.image.startsWith("ipfs://")) {
             // Use both gateway URLs for better availability
             const imageCid = metadata.image.replace("ipfs://", "");
+            console.log(`Image CID: ${imageCid}`);
             nftImageUrl = `https://ipfs.io/ipfs/${imageCid}`;
             
-            // Check if the image is accessible
+            // Check if the image is accessible with timeout
             try {
-              const imageCheck = await fetch(nftImageUrl, { method: 'HEAD' });
+              const imageCheckController = new AbortController();
+              const imageTimeoutId = setTimeout(() => imageCheckController.abort(), 5000); // 5 second timeout
+              
+              const imageCheck = await fetch(nftImageUrl, { 
+                method: 'HEAD',
+                signal: imageCheckController.signal
+              });
+              
+              clearTimeout(imageTimeoutId);
+              
               if (!imageCheck.ok) {
                 // Try Cloudflare IPFS gateway as fallback
                 nftImageUrl = `https://cloudflare-ipfs.com/ipfs/${imageCid}`;
                 ipfsError = true;
               }
             } catch (e) {
-              // If checking fails, still use ipfs.io but mark as having issues
+              // If checking fails or times out, still use ipfs.io but mark as having issues
+              console.warn(`Image fetch timeout/error for ${imageCid}:`, e);
               ipfsError = true;
             }
           } else {

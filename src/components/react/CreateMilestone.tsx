@@ -35,6 +35,9 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [subscription, setSubscription] = useState<any>(null);
   const [subscriptionLoading, setSubscriptionLoading] = useState(true);
+  // New state for the persistent transaction status indicator
+  const [transactionInProgress, setTransactionInProgress] = useState(false);
+  const [transactionStep, setTransactionStep] = useState<string | null>(null);
 
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -190,6 +193,10 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
 
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
 
+    // Set progress indicator to active
+    setTransactionInProgress(true);
+    setTransactionStep("Preparing milestone data");
+    
     setIsSubmitting(true);
     setStatusMessage(null);
     setStatusType(null);
@@ -200,9 +207,11 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
       if (!formData || !formData.description || !formData.milestone_date) {
         handleError("Please fill out the milestone details correctly.");
         setIsSubmitting(false);
+        setTransactionInProgress(false);
         return;
       }
 
+      setTransactionStep("Uploading milestone data");
       const payload = new FormData();
       if (window.ethereum && window.ethereum.selectedAddress) {
         payload.append("walletAddress", window.ethereum.selectedAddress);
@@ -215,6 +224,7 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
       payload.append("fee", getApplicableFee() || "");
       if (selectedFile) payload.append("image", selectedFile);
 
+      setTransactionStep("Generating blockchain transaction");
       const txPayload = await fetch("/api/milestone/create", {
         method: "POST",
         body: payload,
@@ -230,23 +240,29 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
       }
 
       const { id, metaTxRequest, ipfsCIDs, owner } = await txPayload.json();
+      
+      setTransactionStep("Preparing signature request");
       const contractInfo = await fetch(`/api/wallet/domain?to=${metaTxRequest.to}`);
       const { domain, types } = await contractInfo.json();
 
       const provider = new ethers.BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
+      
+      setTransactionStep("Waiting for milestone signature");
       let signature;
       try {
         signature = await signer.signTypedData(domain, types, metaTxRequest);
       } catch {
         handleError("Signature request was rejected.");
         cleanupIpfs(ipfsCIDs);
+        setTransactionInProgress(false);
         return;
       }
 
       const tx = { ...metaTxRequest, signature };
 
       // Payment
+      setTransactionStep("Preparing payment transaction");
       const payment = await fetch("api/transaction/make-permit-tx", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -264,15 +280,18 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
       const paymentData = await payment.json();
       const { domain: paymentDomain, types: paymentTypes, message: paymentMessage } = paymentData;
 
+      setTransactionStep("Waiting for payment signature");
       let paymentSignature;
       try {
         paymentSignature = await signer.signTypedData(paymentDomain, paymentTypes, paymentMessage);
       } catch {
         handleError("Signature request was rejected.");
         cleanupIpfs(ipfsCIDs);
+        setTransactionInProgress(false);
         return;
       }
 
+      setTransactionStep("Processing payment");
       const paymentTx = await fetch("/api/transaction/send-permit-tx", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -293,6 +312,7 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
       setStatusType("success");
 
       // Relay
+      setTransactionStep("Creating milestone on blockchain");
       const relayRes = await fetch("/api/milestone/relay", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -309,6 +329,7 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
       }
 
       // Store milestone
+      setTransactionStep("Finalizing milestone data");
       const store = await fetch("/api/milestone/store", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -320,16 +341,19 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
         }),
       });
 
-
-
-
       if(store.ok){
+        setTransactionStep("Milestone created successfully!");
         setStatusMessage("Milestone created successfully!");
         setStatusType("success");
         setSelectedFile(null);
         setImagePreview(null);
+        
+        // Clear transaction progress after a success delay
+        setTimeout(() => {
+          setTransactionInProgress(false);
+          setTransactionStep(null);
+        }, 3000);
       }
-
 
       timeoutRef.current = setTimeout(() => {
         setStatusMessage(null);
@@ -340,6 +364,8 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
       handleError(
         `An error occurred: ${error instanceof Error ? error.message : String(error)}`
       );
+      setTransactionInProgress(false);
+      setTransactionStep(null);
     } finally {
       setIsSubmitting(false);
     }
@@ -402,6 +428,27 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
   return (
     <div className="container mx-auto py-8">
       <h1 className="text-2xl font-bold mb-4 text-white">Create a New Milestone</h1>
+      
+      {/* Transaction Progress Indicator */}
+      {transactionInProgress && (
+        <div className="fixed top-0 left-0 right-0 z-50 bg-purple-900/90 border-b border-purple-700 shadow-lg">
+          <div className="container mx-auto px-4 py-3">
+            <div className="flex items-center">
+              <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent mr-3"></div>
+              <div className="flex-1">
+                <p className="text-white font-medium">
+                  {transactionStep || "Processing transaction"}
+                </p>
+                <p className="text-purple-300 text-sm mt-0.5">
+                  <span className="font-bold">DO NOT REFRESH OR CLOSE THIS PAGE</span>
+                  {' '}- You may lose funds if this transaction is interrupted
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      
       {statusMessage && (
         <div
           className={`p-3 rounded-md mb-4 ${

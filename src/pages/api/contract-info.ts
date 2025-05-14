@@ -32,6 +32,10 @@ const CONTRACTS = {
     address: process.env.FORWARDER_ADDRESS || import.meta.env.FORWARDER_ADDRESS,
     abiEnv: "FORWARDER_ABI",
   },
+  nft: {
+    address: process.env.MILESTONE_NFT_ADDRESS || import.meta.env.MILESTONE_NFT_ADDRESS,
+    abiEnv: "MILESTONE_NFT_ABI",
+  }
   // Add more contracts as needed
 };
 
