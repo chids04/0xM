@@ -19,6 +19,8 @@ const db = getFirestore(app);
 const auth = getAuth(app);
 const user = Astro.locals.user;
 
+//load friend info to pass to react component
+
 const requestStatusDoc = await db
   .collection("users")
   .doc(user.uid)
@@ -53,5 +55,5 @@ if (friendIds.length > 0) {
 ---
 
 <Layout title="Create Milestone">
-  <CreateMilestone client:load friends={friends} userId={user.uid} />
+  <CreateMilestone client:visible friends={friends} userId={user.uid} />
 </Layout>

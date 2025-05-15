@@ -483,13 +483,24 @@ export function NFTGallery({ userId, friends }: NFTGalleryProps) {
                     </div>
                   )}
                   
-                  {/* Full-size image */}
                   <div className="bg-gradient-to-b from-gray-800 to-gray-900 rounded-lg overflow-hidden mb-6">
                     <img 
                       src={selectedNFT.nftImageUrl} 
                       alt={`NFT ${selectedNFT.tokenId}`} 
-                      className="w-full object-contain max-h-[70vh]"
+                      className="w-full object-contain max-h-[50vh]"
                     />
+                  </div>
+                  
+                  <div className="flex justify-center mb-4">
+                    <button
+                      onClick={closeFullImageModal}
+                      className="px-6 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-md flex items-center"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                      </svg>
+                      Close Image
+                    </button>
                   </div>
                   
                   {/* NFT details */}

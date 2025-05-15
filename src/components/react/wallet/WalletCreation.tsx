@@ -7,8 +7,11 @@ import {
   getFirestore,
   doc,
   runTransaction,
-  getDoc
+  getDoc,
+  writeBatch
 } from "firebase/firestore"
+
+import { getAuth } from "firebase/auth"
 
 interface WalletCreationModalProps {
   userId: string
@@ -20,12 +23,27 @@ export function WalletCreationModal({ userId }: WalletCreationModalProps) {
   const [error, setError] = useState<string | null>(null)
   const [address, setAddress] = useState<string | null>(null)
 
-  // Show modal when userId is set
+  //event listener to open modal
+  useEffect(() => {
+    const handleOpenModal = () => {
+      setShowModal(true);
+    };
+
+    document.addEventListener('open-wallet-modal', handleOpenModal);
+    
+    return () => {
+      document.removeEventListener('open-wallet-modal', handleOpenModal);
+    };
+  }, []);
+
+  //shows modal when userID changes
   useEffect(() => {
     if (!userId) return;
   
     const checkWallet = async () => {
       const db = getFirestore(app);
+      const auth = getAuth(app)
+
       const userWalletRef = doc(db, "users", userId, "wallet", "wallet_info");
     const userWalletSnap = await getDoc(userWalletRef);
     const walletAddress = userWalletSnap.data()?.address;
@@ -97,6 +115,7 @@ export function WalletCreationModal({ userId }: WalletCreationModalProps) {
             method: "wallet_requestPermissions",
             params: [{ eth_accounts: {} }],
           })
+
           setError(err.message)
         } catch (permErr: any) {
           setError("Permission request was denied. Please select a different wallet in MetaMask.")
@@ -115,38 +134,44 @@ export function WalletCreationModal({ userId }: WalletCreationModalProps) {
     const globalRef = doc(db, "wallets", addr)
     const userWalletRef = doc(db, "users", uid, "wallet", "wallet_info")
 
+    const globalSnap = await getDoc(globalRef)
+    if (globalSnap.exists() && globalSnap.data().userId !== uid) {
+      throw new Error("This wallet is already linked to another account.")
+    }
+    
     const userWalletSnap = await getDoc(userWalletRef)
     if (userWalletSnap.exists() && userWalletSnap.data().address !== addr) {
       throw new Error("This email is already linked to another wallet")
     }
 
-    await runTransaction(db, async (tx) => {
-      const globalSnap = await tx.get(globalRef)
-      if (globalSnap.exists() && globalSnap.data().userId !== uid) {
-        throw new Error("This wallet is already linked to another account.")
-      }
+    // free reward for new users
+    const res = await fetch("/api/wallet/airdrop", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ address: addr }),
+    });
 
-      //free reward for new users (contract mints to first 100 people)
-      const res = await fetch("/api/wallet/airdrop", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ address: addr }),
-      });
+    if (!res.ok) {
+      setError("Failed to claim free rewards. Sorry!");
+    }
 
-      if (!res.ok) {
-        setError("Failed to claim free rewards. Sorry!");
-      }
-
-      tx.set(globalRef, {
+    // create or update the records
+    const batch = writeBatch(db)
+    
+    batch.set(userWalletRef, {
+      address: addr,
+      createdAt: Date.now()
+    })
+    
+    if (!globalSnap.exists()) {
+      batch.set(globalRef, {
         userId: uid,
         address: addr,
         createdAt: Date.now()
       })
-      tx.set(userWalletRef, {
-        address: addr,
-        createdAt: Date.now()
-      })
-    })
+    }
+    
+    await batch.commit()
   }
 
   if (!showModal) return null

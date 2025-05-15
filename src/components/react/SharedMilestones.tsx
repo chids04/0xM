@@ -915,7 +915,7 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
 
       const signer = await provider.getSigner();
 
-      // Request permit data for the mint price
+      // request permit data for the mint price
       const permitRes = await fetch("/api/transaction/make-permit-tx", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -963,7 +963,6 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
         throw new Error(errorData?.error?.message || "Failed to send permit transaction");
       }
       
-      // 2. Create meta-tx for NFT mint
       setStatus("Preparing NFT metadata...", "success");
       const formData = new FormData();
       formData.append('image', imageFile);
@@ -988,7 +987,6 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
       
       const { metaTxRequest, domain, types } = await mintTxRes.json();
   
-      // 3. User signs meta-tx for minting NFT
       setStatus("Please sign the NFT minting transaction in your wallet", "success");
       let mintSignature;
       try {
@@ -1005,7 +1003,6 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
       
       const tx = { ...metaTxRequest, signature: mintSignature };
   
-      // 4. Relay meta-tx to backend
       setStatus("Submitting NFT minting transaction to blockchain...", "success");
       const relayRes = await fetch("/api/milestone/relay", {
         method: "POST",
@@ -1029,7 +1026,6 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
 
       const { txHash, blockNum } = result;
 
-      // Save NFT tokenId to Firestore for the user
       setStatus("Saving NFT information...", "success");
       try {
         const saveTokenIdRes = await fetch("/api/nft/save-tokenid", {
@@ -1048,7 +1044,6 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
         console.error("Error calling save-tokenid endpoint:", err);
       }
 
-      // Show success notification
       setStatus("NFT minted successfully!", "success");
       alert(`NFT minted successfully! Tx Hash: ${result.txHash}`);
       setPreviewData(prev => ({ ...prev, loading: false, visible: false }));

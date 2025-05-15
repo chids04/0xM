@@ -67,6 +67,7 @@ if(sessionCookie){
   import {
     getAuth,
     inMemoryPersistence,
+    browserLocalPersistence,
     signInWithEmailAndPassword,
     GoogleAuthProvider,
     FacebookAuthProvider,
@@ -77,10 +78,9 @@ if(sessionCookie){
   import { app } from "../firebase/client";
   
   const authClient = getAuth(app);
-  // Prevent session persistence (for demo purpose)
-  authClient.setPersistence(inMemoryPersistence);
-  
-  
+  authClient.setPersistence(browserLocalPersistence);
+
+
   const gSignIn = document.querySelector("#google");
   if(gSignIn){
     gSignIn.addEventListener("click", async () => {

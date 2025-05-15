@@ -43,7 +43,7 @@ export default function TransactionHistory({ currentUser }: TransactionHistoryPr
         }
 
         const walletData = walletSnapshot.data();
-        const address = walletData.publicKey;
+        const address = walletData.address;
         setUserAddress(address);
 
         if (!address) {

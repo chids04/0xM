@@ -3,7 +3,7 @@ import "../styles/global.css"
 import { UserCard } from "@/components/react/UserCard";
 import { app } from "../firebase/server";
 import { getAuth } from "firebase-admin/auth";
-import WalletCreationModal from "../components/WalletCreationModal.astro";
+import { WalletCreationModal } from "@/components/react/wallet/WalletCreation";
 
 const user = Astro.locals.user
 const userPhotoURL = "https://api.dicebear.com/7.x/initials/svg?seed=" + user.displayName;
@@ -107,18 +107,16 @@ const userPhotoURL = "https://api.dicebear.com/7.x/initials/svg?seed=" + user.di
                 <!-- Bottom Section: Settings & Sign Out -->
                 <div class="mt-auto">
                   <h3 class="text-xs uppercase text-gray-500 font-semibold mb-3 px-4">System</h3>
-                  <ul class="space-y-2">
-                    <li>
-                      <a href="/settings" class="flex items-center gap-3 px-4 py-3 rounded-xl bg-[#1a1a1a] hover:bg-[#222222] text-gray-100 transition-all duration-200 hover:translate-x-1 hover:shadow-md group">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-purple-400 group-hover:text-purple-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                        </svg>
-                        Settings
-                      </a>
-                    </li>
-                  </ul>
-                  
+
+                  <div class="mb-3">
+                    <button id="connect-wallet-btn" class="w-full px-4 py-3 bg-[#1c1c1c] text-white rounded-lg shadow-md hover:shadow-lg transition-all duration-200 hover:-translate-y-0.5 flex items-center justify-center gap-2">
+                      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                      </svg>
+                      Connect Wallet
+                    </button>
+                  </div>
+
                   <form action="/api/auth/signout" method="GET" class="mt-4">
                     <button type="submit" class="w-full px-4 py-3 bg-[#1c1c1c] text-white rounded-lg shadow-md hover:shadow-lg transition-all duration-200 hover:-translate-y-0.5 flex items-center justify-center gap-2">
                       <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -147,6 +145,7 @@ const userPhotoURL = "https://api.dicebear.com/7.x/initials/svg?seed=" + user.di
 
             </main>
         </div>
+        <WalletCreationModal client:load userId={user.uid} />
 
         <!-- Overlay for mobile -->
         <div id="overlay" class="fixed inset-0 bg-black opacity-0 pointer-events-none transition-opacity duration-300 ease-in-out z-30"></div>
@@ -158,6 +157,8 @@ const userPhotoURL = "https://api.dicebear.com/7.x/initials/svg?seed=" + user.di
     const toggleButton = document.getElementById('toggle-nav');
     const sidebar = document.getElementById('sidebar');
     const overlay = document.getElementById('overlay');
+    const connectWalletBtn = document.getElementById('connect-wallet-btn');
+
 
     if (toggleButton && sidebar && overlay) {
       toggleButton.addEventListener('click', (e) => {
@@ -192,5 +193,14 @@ const userPhotoURL = "https://api.dicebear.com/7.x/initials/svg?seed=" + user.di
         toggleButton.style.transform = 'translateY(-50%)';
       });
     }
+
+    if (connectWalletBtn) {
+      connectWalletBtn.addEventListener('click', () => {
+        // Create a custom event that WalletCreationModal.tsx will listen for
+        const event = new CustomEvent('open-wallet-modal');
+        document.dispatchEvent(event);
+      });
+    }
   });
+
 </script>

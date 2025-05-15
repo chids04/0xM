@@ -1,13 +1,80 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+    // helper functions
+    function isSignedIn() {
+      return request.auth != null;
     }
-  }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
 
-  match /milestones/{milestoneId} {
-      allow read: if true;
+    // user document and subcollections
+    match /users/{userId} {
+      // Allow users to read and write their own data
+      allow read, write: if isOwner(userId);
+      
+      // wallet subcollection - users can only access their own wallet
+      match /wallet/{documentId} {
+        allow read, write: if isOwner(userId);
+      }
+      
+      match /milestones/{collectionType} {
+        // allow users to read their own milestone collections
+        allow read: if isOwner(userId);
+        
+        allow write: if isSignedIn() && (isOwner(userId) || 
+                     request.resource.data.keys().hasAny(['milestoneRefs']));
+      }
+      
+      // allow access to any other nested collections
+      match /{collection}/{document=**} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+    
+    // global wallet addresses - public lookups but controlled creation
+    match /wallets/{walletAddr} {
+      // allow any authenticated user to read wallet documents
+      allow read: if isSignedIn();
+      
+      // allow creating new wallet documents but not modifying existing ones
+      allow create: if isSignedIn() 
+                   && request.resource.data.userId == request.auth.uid
+                   && request.resource.data.address == walletAddr;
+                   
+      // prevent updating or deleting
+      allow update, delete: if false;
+    }
+    
+    // milestone documents - controlled access
+    match /milestones/{milestoneId} {
+      // allow reading if user is owner or a tagged participant
+      allow read: if isSignedIn() && 
+              (resource.data.owner == request.auth.uid || 
+              (resource.data.taggedFriendIds is list && request.auth.uid in resource.data.taggedFriendIds));
+      
+      // only allow writes through backend 
       allow write: if false;
     }
+    
+    // transaction history
+    match /transactions/{transactionId} {
+      // allow public read access to transactions
+      allow read: if true;
+                   
+      // only allow writes through backend API
+      allow write: if false;
+    }
+    
+    //nfts
+    match /nfts/{tokenId} {
+      //public reading
+      allow read: if true;
+      
+      // only allow creation through backend API
+      allow create, update, delete: if false;
+    }
+  }
 }

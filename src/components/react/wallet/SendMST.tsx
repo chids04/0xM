@@ -24,13 +24,13 @@ export function SendMST({ friends, senderAddress, currentUser}: SendMSTProps) {
   const [success, setSuccess] = useState<string | null>(null);
   const [transferFee, setTransferFee] = useState<string | null>(null);
 
-  // Only clear messages after a delay to ensure they're seen
+  // only clear messages after a delay to ensure they're seen
   useEffect(() => {
     if (success || error) {
       const timer = setTimeout(() => {
         setError(null);
         setSuccess(null);
-      }, 5000); // Messages stay for 5 seconds
+      }, 5000); // messages stay for 5 seconds
       return () => clearTimeout(timer);
     }
   }, [success, error]);
@@ -253,7 +253,6 @@ export function SendMST({ friends, senderAddress, currentUser}: SendMSTProps) {
       
       
       <CardContent className="p-6 space-y-4">
-        {/* Friend Selection */}
         {friends.length > 0 && (
           <div className="space-y-2">
             <label className="block text-gray-300 text-sm font-medium mb-1">
@@ -283,7 +282,6 @@ export function SendMST({ friends, senderAddress, currentUser}: SendMSTProps) {
           </div>
         )}
         
-        {/* Manual Address Input */}
         <div className="space-y-2">
           <label className="block text-gray-300 text-sm font-medium mb-1">
             Recipient Address

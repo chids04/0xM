@@ -4,6 +4,8 @@ import { Card, CardHeader, CardContent } from "@/components/ui/card"
 import { useState, useEffect } from 'react'
 import { doc, getFirestore, onSnapshot } from "firebase/firestore"
 import { app } from "../../firebase/client"
+import { getAuth, onAuthStateChanged } from "firebase/auth"
+
 
 interface UserCardProps {
   user: any;
@@ -12,10 +14,32 @@ interface UserCardProps {
 
 export function UserCard({ user, photoURL }: UserCardProps) {
   const [walletBalance, setWalletBalance] = useState("0.00 MST")
+ const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+
+  // Track current authenticated user
+  useEffect(() => {
+    const auth = getAuth(app);
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        // User is signed in
+        console.log("Current user ID:", user.uid);
+        setCurrentUserId(user.uid);
+      } else {
+        // User is signed out
+        console.log("No user signed in");
+        setCurrentUserId(null);
+      }
+    });
+    
+    // Clean up the listener on unmount
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
-    // Set up real-time listener for this user's document
+    // set up real-time listener for this user's document
     const db = getFirestore(app)
+    const auth = getAuth(app)
+    console.log(auth.currentUser)
     const userRef = doc(db, 'users', user.uid, "wallet", "wallet_info");
     
     const unsubscribe = onSnapshot(userRef, (docSnapshot) => {
@@ -28,7 +52,7 @@ export function UserCard({ user, photoURL }: UserCardProps) {
       console.error("Error listening to Firestore updates:", error);
     });
 
-    // Cleanup subscription on unmount
+    // cleanup subscription on unmount
     return () => unsubscribe();
   }, [user.uid]);
 
