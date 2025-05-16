@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ethers } from 'ethers';
 
+import benchmarkService from '@/utils/BenchmarkService';
+
 interface NFTGalleryProps {
   userId: string;
   friends: Friend[];
@@ -228,6 +230,7 @@ export function NFTGallery({ userId, friends }: NFTGalleryProps) {
 
   // Direct transfer using user's wallet
   const handleTransferNFT = async () => {
+    const end = benchmarkService.start("nftTransfer");
     // Validate input
     if (!transferToAddress) {
       setTransferError("Please enter a recipient address");
@@ -249,6 +252,7 @@ export function NFTGallery({ userId, friends }: NFTGalleryProps) {
     setTransferSuccess(null);
     
     try {
+
       setStatus("Please connect your wallet to transfer the NFT...", "success");
       
       // Check if MetaMask is installed
@@ -321,6 +325,7 @@ export function NFTGallery({ userId, friends }: NFTGalleryProps) {
     } finally {
       setTransferLoading(false);
     }
+  end();
   };
 
   if (loading || contractLoading) {
@@ -411,7 +416,6 @@ export function NFTGallery({ userId, friends }: NFTGalleryProps) {
                 #{nft.tokenId}
               </div>
               
-              {/* IPFS Loading Issue Indicator for individual NFT */}
               {nft.ipfsError && (
                 <div className="absolute bottom-2 left-2 bg-amber-500/80 text-black px-2 py-1 rounded-md text-xs">
                   Limited Data

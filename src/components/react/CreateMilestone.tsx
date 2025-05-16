@@ -5,6 +5,8 @@ import { app } from "../../firebase/client"
 import { getFirestore, doc, getDoc } from "firebase/firestore";
 import { ethers } from "ethers";
 
+import benchmarkService from "@/utils/BenchmarkService";
+
 interface Friend {
   uid: string;
   displayName: string;
@@ -175,6 +177,9 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
 
 
   const createMilestone = async () => {
+
+    const end = benchmarkService.start("createMilestoneWithImage");
+
     if (isSubmitting) return;
 
     if (
@@ -369,6 +374,8 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
     } finally {
       setIsSubmitting(false);
     }
+
+    end();
   };
 
   // --- Fee Calculation ---

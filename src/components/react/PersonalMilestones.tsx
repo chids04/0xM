@@ -4,6 +4,7 @@ import { app, auth } from '../../firebase/client';
 import { getAuth, onAuthStateChanged } from 'firebase/auth'
 import html2canvas from 'html2canvas-pro';
 import { ethers } from 'ethers';
+import benchmarkService from '@/utils/BenchmarkService';
 
 interface MilestoneTimelineProps {
   userId: string;
@@ -244,7 +245,9 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
     };
 
     if (userId) {
+      const end = benchmarkService.start("personalMilestone");
       fetchMilestones();
+      end();
     }
     
     return () => {
