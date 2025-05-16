@@ -46,6 +46,8 @@ export function WalletBalance({ currentUser }: WalletBalanceProps) {
                     return;
                 }
 
+                console.log("Token Address:", tokenAddress);
+
                 // Setup ethers provider and contract
                 const provider = new ethers.BrowserProvider(window.ethereum);
                 const contract = new ethers.Contract(tokenAddress, abi, provider);
@@ -64,7 +66,7 @@ export function WalletBalance({ currentUser }: WalletBalanceProps) {
 
             } catch (error: any) {
                 console.error('Error fetching wallet data:', error);
-                setError(error.message || 'Could not load balance');
+                setError('Could not load balance');
                 setBalance(0);
             } finally {
                 setLoading(false);

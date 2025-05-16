@@ -3,7 +3,7 @@ import { app } from '../../firebase/client';
 import { doc, getDoc, getFirestore, writeBatch } from 'firebase/firestore';
 import html2canvas from 'html2canvas-pro';
 import { ethers } from 'ethers';
-import { error } from 'node_modules/astro/dist/core/logger/core';
+import benchmarkService from "@/utils/BenchmarkService";
 
 interface SharedMilestoneTimelineProps {
   userId: string;
@@ -99,6 +99,7 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
 
       setIsLoading(true);
       const db = getFirestore(app);
+      const end = benchmarkService.start("sharedMilestones");
 
       // Helper to fetch and join Firestore + IPFS data
       const fetchMilestoneWithIpfs = async (refPath: any) => {
@@ -335,8 +336,10 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
         console.error("Error fetching milestones:", error);
         setStatus("Error fetching milestones. Please try again.", "error");
       } finally {
+        end();
         setIsLoading(false);
       }
+    
     };
 
     fetchMilestonesAndDetails();
@@ -611,6 +614,7 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
 
     setIsLoading(true);
     setStatus("Starting the milestone denial process. Do not refresh the page.", "success");
+    const end = benchmarkService.start("milestoneDeny");
 
     try {
       if (!feeData?.signMilestoneFee) {
@@ -749,6 +753,7 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
     } finally {
       setIsLoading(false);
     }
+    end();
   };
 
   // Verify a single milestone

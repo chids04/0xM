@@ -1,4 +1,3 @@
-
 // used to benchmark performance of different endpoints
 class BenchmarkService {
   private benchmarks: { [label: string]: number[] } = {};

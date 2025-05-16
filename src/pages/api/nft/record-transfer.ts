@@ -61,6 +61,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
 
     const db = getFirestore(app);
 
+    // 1. Remove token from sender's collection
     const userNftDoc = await db.collection("users").doc(userId).collection("nft").doc("tokenIDs").get();
     
     if (userNftDoc.exists) {
@@ -73,18 +74,50 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       });
     }
     
-    // Add transfer record
+    // 2. Find recipient's userId by wallet address
+    const recipientQuery = await db.collection("wallets")
+      .where("address", "==", toAddress.toLowerCase())
+      .limit(1)
+      .get();
+      
+    let recipientUserId = null;
+    if (!recipientQuery.empty) {
+      recipientUserId = recipientQuery.docs[0].data().userId;
+      console.log(`Found recipient user ID: ${recipientUserId}`);
+      
+      // 3. Add token to recipient's collection
+      if (recipientUserId) {
+        const recipientNftDoc = await db.collection("users").doc(recipientUserId).collection("nft").doc("tokenIDs").get();
+        const recipientTokenIDs = recipientNftDoc.exists ? (recipientNftDoc.data()?.tokenIDs || []) : [];
+        
+        // Only add if it's not already in the array
+        if (!recipientTokenIDs.includes(tokenId.toString())) {
+          await db.collection("users").doc(recipientUserId).collection("nft").doc("tokenIDs").set({
+            tokenIDs: [...recipientTokenIDs, tokenId.toString()]
+          });
+          console.log(`Added token ${tokenId} to recipient ${recipientUserId}'s collection`);
+        }
+      } else {
+        console.warn(`Could not determine user ID for wallet address: ${toAddress}`);
+      }
+    }
+    
+    // 4. Add transfer record
     await db.collection("transfers").add({
       tokenId,
       fromAddress,
       toAddress,
       txHash,
-      userId,
+      fromUserId: userId,
+      toUserId: recipientUserId, // May be null if recipient not found
       timestamp: new Date()
     });
 
     return new Response(
-      JSON.stringify({ success: true }),
+      JSON.stringify({ 
+        success: true,
+        recipientFound: !!recipientUserId
+      }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
   } catch (error: any) {

@@ -8,12 +8,14 @@ console.log(errorMessage)
 ---
 
 <Layout title="Register">
-  <div class="min-h-screen flex items-center justify-center bg-[#0e0e0e]">
+  <div class="min-h-screen flex items-center justify-center bg-[#0e0e0e] px-4">
+    <!-- Added `px-4` to this wrapper for horizontal padding -->
     <div class="w-full max-w-md p-8 space-y-8 bg-[#1f1f1f] rounded-lg shadow-lg">
-      <p class=" text-gray-300 font-bold">Already have an accounnt?
-      <a href="/signin" class="text-gray-500 hover:underline">sign in</a>
+      <p class="text-gray-300 font-bold">
+        Already have an account?
+        <a href="/signin" class="text-gray-500 hover:underline">sign in</a>
       </p>
-      <RegisterForm client:visible/>
+      <RegisterForm client:visible />
     </div>
   </div>
 </Layout>

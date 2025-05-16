@@ -134,6 +134,7 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
     };
 
     const fetchMilestones = async () => {
+      const end = benchmarkService.start("personalMilestone")
       try {
         const acceptedRef = doc(db, "users", userId, "milestones", "accepted");
         const acceptedSnapshot = await getDoc(acceptedRef);
@@ -240,14 +241,13 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
         setMilestones([]);
         setFilteredMilestones([]);
       } finally {
+        end();
         setIsLoading(false);
       }
     };
 
     if (userId) {
-      const end = benchmarkService.start("personalMilestone");
       fetchMilestones();
-      end();
     }
     
     return () => {
@@ -563,6 +563,7 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
 
   const handleSaveImage = async () => {
     if (!previewData.milestone) return;
+    const end = benchmarkService.start("mint NFT")
   
     setPreviewData(prev => ({ ...prev, loading: true }));
     setStatus("Starting NFT minting process...", "success");
@@ -754,6 +755,7 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
         error: error.message || 'Failed to mint NFT'
       }));
     }
+  end();
   };
 
   // Get verification status badge

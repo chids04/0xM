@@ -23,44 +23,43 @@ if(sessionCookie){
 ---
 
 <Layout title="Sign in">
- 
-    <div class="min-h-screen flex items-center justify-center bg-[#0e0e0e]">
-      <div class="w-full max-w-md p-8 space-y-8 bg-[#1f1f1f] rounded-lg shadow-lg">
-        <h1 class="text-center text-white font-bold mb-2 text-2xl">Sign In</h1>
+  <div class="min-h-screen flex items-center justify-center bg-[#0e0e0e] px-4">
+    <!-- Added `px-4` to this wrapper for horizontal padding -->
+    <div class="w-full max-w-md p-8 space-y-8 bg-[#1f1f1f] rounded-lg shadow-lg">
+      <h1 class="text-center text-white font-bold mb-2 text-2xl">Sign In</h1>
 
-        <p class="text-center text-gray-300">
+      <p class="text-center text-gray-300">
         or <a href="/register" class="text-gray-500 hover:underline">register here</a>
-        </p>
+      </p>
 
-        <p class="text-center text-gray-300 mt-2">
-          <a href="/forgot-password" class="text-gray-500 hover:underline">Forgot your password?</a>
-        </p>
+      <p class="text-center text-gray-300 mt-2">
+        <a href="/forgot-password" class="text-gray-500 hover:underline">Forgot your password?</a>
+      </p>
 
-        <ProfileForm client:visible/>
-        
-        <div class="mt-6">
-          <div class="flex items-center">
-            <!-- Left divider -->
-            <div class="flex-grow border-t border-[#141313]"></div>
-            <!-- Separator text -->
-            <span class="mx-2 text-gray-300">or continue with</span>
-            <!-- Right divider -->
-            <div class="flex-grow border-t border-[#141313]"></div>
-          </div>
-          <div class="mt-4 space-y-4 flex flex-col items-center">
-            <!-- Google Sign In -->
-            <button id="google" class="">
-              <img src={googleLogo.src} alt="Google" class="mx-auto" />
-            </button>
-            <!-- Facebook Sign In -->
-            <button id="facebook" class="">
-              <img src={fbLogo.src} alt="Facebook" class="mx-auto" />
-            </button>
-          </div>
+      <ProfileForm client:visible />
+
+      <div class="mt-6">
+        <div class="flex items-center">
+          <!-- Left divider -->
+          <div class="flex-grow border-t border-[#141313]"></div>
+          <!-- Separator text -->
+          <span class="mx-2 text-gray-300">or continue with</span>
+          <!-- Right divider -->
+          <div class="flex-grow border-t border-[#141313]"></div>
         </div>
-
+        <div class="mt-4 space-y-4 flex flex-col items-center">
+          <!-- Google Sign In -->
+          <button id="google" class="">
+            <img src={googleLogo.src} alt="Google" class="mx-auto" />
+          </button>
+          <!-- Facebook Sign In -->
+          <button id="facebook" class="">
+            <img src={fbLogo.src} alt="Facebook" class="mx-auto" />
+          </button>
+        </div>
       </div>
     </div>
+  </div>
 </Layout>
 
 <script>

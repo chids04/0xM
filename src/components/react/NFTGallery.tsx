@@ -92,6 +92,7 @@ export function NFTGallery({ userId, friends }: NFTGalleryProps) {
       setLoading(true);
       setError(null);
       setIpfsLoadingIssue(false);
+      const end = benchmarkService.start("nftFetch");
       
       try {
         const response = await fetch(`/api/nft/get-user-nfts?userId=${userId}`);
@@ -115,6 +116,7 @@ export function NFTGallery({ userId, friends }: NFTGalleryProps) {
         setError(e instanceof Error ? e.message : 'Unknown error');
       } finally {
         setLoading(false);
+        end();
       }
     };
     

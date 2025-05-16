@@ -122,6 +122,8 @@ export const POST: APIRoute = async ({ request, cookies }) => {
     }
 
     const owner = milestoneData?.owner;
+    console.log("Owner:", owner);
+    console.log("User ID:", userId);
     if (owner !== userId) {
       return new Response(
         JSON.stringify({

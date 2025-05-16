@@ -1,11 +1,10 @@
 "use client"
 
-import { Card, CardHeader, CardContent } from "@/components/ui/card"
+import { Card, CardHeader } from "@/components/ui/card"
 import { useState, useEffect } from 'react'
-import { doc, getFirestore, onSnapshot } from "firebase/firestore"
-import { app } from "../../firebase/client"
 import { getAuth, onAuthStateChanged } from "firebase/auth"
-
+import { app } from "../../firebase/client"
+import { ethers } from 'ethers'
 
 interface UserCardProps {
   user: any;
@@ -14,7 +13,9 @@ interface UserCardProps {
 
 export function UserCard({ user, photoURL }: UserCardProps) {
   const [walletBalance, setWalletBalance] = useState("0.00 MST")
- const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [walletAddress, setWalletAddress] = useState<string | null>(null)
+  const [provider, setProvider] = useState<ethers.BrowserProvider | null>(null)
 
   // Track current authenticated user
   useEffect(() => {
@@ -35,28 +36,91 @@ export function UserCard({ user, photoURL }: UserCardProps) {
     return () => unsubscribe();
   }, []);
 
+  // Listen for MetaMask accounts without requesting them
   useEffect(() => {
-    // set up real-time listener for this user's document
-    const db = getFirestore(app)
-    const auth = getAuth(app)
-    console.log(auth.currentUser)
-    const userRef = doc(db, 'users', user.uid, "wallet", "wallet_info");
-    
-    const unsubscribe = onSnapshot(userRef, (docSnapshot) => {
-      if (docSnapshot.exists()) {
-        const data = docSnapshot.data();
-        setWalletBalance(data.balance+ " MST" || "0.00 MST");
-        console.log(data.balance)
+    const setupMetaMaskListeners = async () => {
+      if (!window.ethereum) {
+        console.warn("MetaMask is not installed");
+        return;
       }
-    }, (error) => {
-      console.error("Error listening to Firestore updates:", error);
-    });
 
-    // cleanup subscription on unmount
-    return () => unsubscribe();
-  }, [user.uid]);
+      // Create provider
+      const ethProvider = new ethers.BrowserProvider(window.ethereum);
+      setProvider(ethProvider);
+      
+      // Check if any accounts are already connected
+      try {
+        const accounts = await window.ethereum.request({ 
+          method: 'eth_accounts' // Uses eth_accounts instead of eth_requestAccounts
+        });
+        
+        if (accounts && accounts.length > 0) {
+          setWalletAddress(accounts[0]);
+          console.log("Found connected wallet:", accounts[0]);
+        }
+      } catch (error) {
+        console.error("Error checking for connected accounts:", error);
+      }
 
-  
+      // Listen for account changes
+      const handleAccountsChanged = (accounts: string[]) => {
+        console.log("Accounts changed:", accounts);
+        if (accounts.length > 0) {
+          setWalletAddress(accounts[0]);
+        } else {
+          setWalletAddress(null);
+        }
+      };
+      
+      window.ethereum.on('accountsChanged', handleAccountsChanged);
+      
+      // Clean up listener
+      return () => {
+        window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
+      };
+    };
+    
+    setupMetaMaskListeners();
+  }, []);
+
+  // Fetch token balance using contract
+  useEffect(() => {
+    if (!walletAddress) return;
+    
+    const fetchTokenBalance = async () => {
+      try {
+        // Get token contract info
+        const contractInfoRes = await fetch('/api/contract-info?contract=token');
+        if (!contractInfoRes.ok) throw new Error("Failed to fetch contract info");
+        
+        const { address: tokenAddress, abi } = await contractInfoRes.json();
+        if (!tokenAddress || !abi) throw new Error("Invalid contract data");
+        
+        // Use a read-only provider for balance checks
+        const readProvider = new ethers.JsonRpcProvider(
+          import.meta.env.PUBLIC_ETHEREUM_RPC_URL || "http://localhost:8545"
+        );
+        const contract = new ethers.Contract(tokenAddress, abi, readProvider);
+        
+        // Get balance
+        const rawBalance = await contract.balanceOf(walletAddress);
+        const formatted = ethers.formatEther(rawBalance);
+        setWalletBalance(`${parseFloat(formatted).toFixed(2)} MST`);
+      } catch (error) {
+        console.error("Error fetching balance from contract:", error);
+        setWalletBalance("Balance unavailiable")
+      }
+    };
+    
+    // Initial fetch
+    fetchTokenBalance();
+    
+    // Setup interval to fetch every 10 seconds
+    const intervalId = setInterval(fetchTokenBalance, 10000);
+    
+    // Cleanup interval on unmount
+    return () => clearInterval(intervalId);
+  }, [walletAddress]);
 
   return (
     <Card className="bg-[#1f1f1f] border-[#333] text-white shadow-lg hover:shadow-xl transition-shadow duration-300 px-4 py-2">
@@ -69,6 +133,11 @@ export function UserCard({ user, photoURL }: UserCardProps) {
         <div className="flex flex-col overflow-hidden">
           <h3 className="text-sm font-medium text-white break-words">{user.displayName}</h3>
           <p className="text-xs text-green-400">{walletBalance}</p>
+          {walletAddress && (
+            <p className="text-xs text-gray-400 truncate">
+              {`${walletAddress.substring(0, 6)}...${walletAddress.substring(walletAddress.length - 4)}`}
+            </p>
+          )}
         </div>
       </CardHeader>
     </Card>

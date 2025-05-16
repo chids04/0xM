@@ -15,9 +15,9 @@ const firebaseConfig = {
 
 export const app = initializeApp(firebaseConfig);
 const db = getFirestore(app)
-const storage = getStorage(app)
 export const auth = getAuth(app)
-connectFirestoreEmulator(db, '127.0.0.1', 8081)
-connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true })
-connectStorageEmulator(storage, '127.0.0.1', 9199)
+const storage = getStorage(app)
+connectFirestoreEmulator(db, '192.168.1.233', 8081)
+connectAuthEmulator(auth, 'http://192.168.1.233:9099', { disableWarnings: true })
+connectStorageEmulator(storage, '192.168.1.233', 9199)
 

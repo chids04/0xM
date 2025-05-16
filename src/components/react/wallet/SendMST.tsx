@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { TagFriendDropdown } from "../TagFriendDropdown";
 import type { Friend } from "../ClientTagFriendDropdown";
+import benchmarkService from "@/utils/BenchmarkService";
 
 import { ethers } from 'ethers';
 
@@ -106,6 +107,7 @@ export function SendMST({ friends, senderAddress, currentUser}: SendMSTProps) {
   };
 
   const handleSend = async () => {
+    const end = benchmarkService.start("transfer");
     if (!validateForm()) return;
     
     setIsLoading(true);
@@ -238,6 +240,7 @@ export function SendMST({ friends, senderAddress, currentUser}: SendMSTProps) {
     } finally {
       setIsLoading(false);
     }
+  end();
   };
 
   return (

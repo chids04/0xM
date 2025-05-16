@@ -1,9 +1,9 @@
 import type { ServiceAccount } from "firebase-admin";
 import { initializeApp, cert, getApps } from "firebase-admin/app";
 
-process.env['FIRESTORE_EMULATOR_HOST'] = 'localhost:8081';
-process.env['FIREBASE_AUTH_EMULATOR_HOST'] = 'localhost:9099';
-process.env['FIREBASE_STORAGE_EMULATOR_HOST'] = 'localhost:9199';
+process.env['FIRESTORE_EMULATOR_HOST'] = '0.0.0.0:8081';
+process.env['FIREBASE_AUTH_EMULATOR_HOST'] = '0.0.0.0:9099';
+process.env['FIREBASE_STORAGE_EMULATOR_HOST'] = '0.0.0.0:9199';
 
 
 const activeApps = getApps();
