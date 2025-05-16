@@ -458,11 +458,15 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
         [milestoneId]: { ...prev[milestoneId], loading: true }
       }));
 
+      const end = benchmarkService.start("verifyMilestone")
+
       const response = await fetch('/api/milestone/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: userId, milestoneId: milestoneId })
       });
+
+      end();
 
       const data = await response.json();
       

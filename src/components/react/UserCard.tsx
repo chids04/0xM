@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react'
 import { getAuth, onAuthStateChanged } from "firebase/auth"
 import { app } from "../../firebase/client"
 import { ethers } from 'ethers'
+import benchmarkService from "@/utils/BenchmarkService"
 
 interface UserCardProps {
   user: any;
@@ -96,15 +97,16 @@ export function UserCard({ user, photoURL }: UserCardProps) {
         const { address: tokenAddress, abi } = await contractInfoRes.json();
         if (!tokenAddress || !abi) throw new Error("Invalid contract data");
         
-        // Use a read-only provider for balance checks
-        const readProvider = new ethers.JsonRpcProvider(
-          import.meta.env.PUBLIC_ETHEREUM_RPC_URL || "http://localhost:8545"
-        );
+        const end = benchmarkService.start("balance")
+
+        const readProvider = new ethers.BrowserProvider(window.ethereum);
+
         const contract = new ethers.Contract(tokenAddress, abi, readProvider);
         
         // Get balance
         const rawBalance = await contract.balanceOf(walletAddress);
         const formatted = ethers.formatEther(rawBalance);
+        end();
         setWalletBalance(`${parseFloat(formatted).toFixed(2)} MST`);
       } catch (error) {
         console.error("Error fetching balance from contract:", error);
