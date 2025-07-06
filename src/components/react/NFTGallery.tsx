@@ -304,7 +304,8 @@ export function NFTGallery({ userId, friends }: NFTGalleryProps) {
           fromAddress: userAddress,
           toAddress: transferToAddress,
           txHash: tx.hash,
-          userId
+          userId,
+          friendUID: selectedFriend ? selectedFriend.uid : null
         })
       });
       
@@ -573,7 +574,7 @@ export function NFTGallery({ userId, friends }: NFTGalleryProps) {
       {/* NFT Transfer Modal */}
       {selectedNFT && isTransferModalOpen && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-          <div className="bg-[#1a1a1a] border border-purple-500/20 rounded-lg max-w-2xl w-full overflow-hidden relative">
+          <div className="bg-[#1a1a1a] border border-purple-500/20 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto relative">
             {/* Close Button */}
             <button
               onClick={closeTransferModal}
@@ -585,14 +586,14 @@ export function NFTGallery({ userId, friends }: NFTGalleryProps) {
             </button>
             
             <div className="flex flex-col">
-              <div className="p-6 border-b border-gray-700">
+              <div className="p-4 border-b border-gray-700">
                 <h2 className="text-xl font-bold text-white">Transfer NFT #{selectedNFT.tokenId}</h2>
               </div>
               
-              <div className="p-6">
-                <div className="flex flex-col md:flex-row mb-6">
-                  <div className="w-full md:w-1/3 md:pr-4 mb-4 md:mb-0">
-                    <div className="aspect-square bg-gradient-to-b from-gray-800 to-gray-900 rounded-lg overflow-hidden">
+              <div className="p-4">
+                <div className="flex flex-col md:flex-row mb-4">
+                  <div className="w-full md:w-1/3 md:pr-4 mb-3 md:mb-0">
+                    <div className="aspect-[3/2] bg-gradient-to-b from-gray-800 to-gray-900 rounded-lg overflow-hidden">
                       <img 
                         src={selectedNFT.nftImageUrl} 
                         alt={`NFT ${selectedNFT.tokenId}`} 
@@ -602,10 +603,10 @@ export function NFTGallery({ userId, friends }: NFTGalleryProps) {
                   </div>
                   
                   <div className="w-full md:w-2/3">
-                    <div className="space-y-4">
+                    <div className="space-y-3">
                       {/* Friend Selection */}
                       {friends.length > 0 && (
-                        <div className="space-y-2">
+                        <div className="space-y-1">
                           <label className="block text-gray-300 text-sm font-medium">
                             Select Friend
                           </label>
@@ -654,17 +655,15 @@ export function NFTGallery({ userId, friends }: NFTGalleryProps) {
                       </div>
                       
                       {/* Gas fee information */}
-                      <div className="mt-4 p-3 bg-[#1a1a1a] border border-amber-500/20 rounded-md">
-                        <div className="flex items-center mb-2">
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-amber-400 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                      <div className="mt-3 p-2 bg-[#1a1a1a] border border-amber-500/20 rounded-md">
+                        <div className="flex items-center mb-1">
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-amber-400 mr-1" viewBox="0 0 20 20" fill="currentColor">
                             <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2h-1V9a1 1 0 00-1-1z" clipRule="evenodd" />
                           </svg>
-                          <span className="text-amber-400 font-medium">Direct Transfer Information</span>
+                          <span className="text-amber-400 font-medium text-sm">Direct Transfer Information</span>
                         </div>
-                        <p className="text-sm text-gray-300 mb-1">
+                        <p className="text-xs text-gray-300">
                           This transfer will be executed directly from your wallet.
-                        </p>
-                        <p className="text-sm text-gray-400">
                           You'll need to pay gas fees in ETH using your connected MetaMask wallet.
                         </p>
                       </div>
@@ -675,7 +674,7 @@ export function NFTGallery({ userId, friends }: NFTGalleryProps) {
                 {/* Messages */}
                 {(transferError || transferSuccess) && (
                   <div 
-                    className={`p-4 rounded-md text-sm mb-4 ${
+                    className={`p-3 rounded-md text-xs mb-3 ${
                       transferError ? 'bg-red-900/50 text-red-300 border border-red-500/30' : 
                       'bg-green-900/50 text-green-300 border border-green-500/30'
                     }`}
@@ -685,10 +684,10 @@ export function NFTGallery({ userId, friends }: NFTGalleryProps) {
                 )}
                 
                 {/* Action Buttons */}
-                <div className="flex justify-end space-x-3 mt-4">
+                <div className="flex justify-end space-x-3 mt-3">
                   <button
                     onClick={closeTransferModal}
-                    className="px-4 py-2 border border-gray-600 text-gray-300 rounded-md hover:bg-gray-800"
+                    className="px-3 py-1.5 border border-gray-600 text-gray-300 rounded-md hover:bg-gray-800"
                   >
                     Cancel
                   </button>
@@ -696,7 +695,7 @@ export function NFTGallery({ userId, friends }: NFTGalleryProps) {
                   <button
                     onClick={handleTransferNFT}
                     disabled={transferLoading || !transferToAddress}
-                    className={`px-4 py-2 bg-purple-600 text-white rounded-md ${
+                    className={`px-3 py-1.5 bg-purple-600 text-white rounded-md ${
                       transferLoading || !transferToAddress ? 
                         'opacity-60 cursor-not-allowed' : 
                         'hover:bg-purple-700'

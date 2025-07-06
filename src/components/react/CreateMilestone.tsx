@@ -333,6 +333,10 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
         throw new Error("Failed to communicate with the blockchain, please try again later");
       }
 
+      const { txHash, blockNum } = await relayRes.json();
+
+
+
       // Store milestone
       setTransactionStep("Finalizing milestone data");
       const store = await fetch("/api/milestone/store", {
@@ -343,6 +347,7 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
           ipfsCIDs,
           taggedFriends: taggedFriends.map((friend) => ({ uid: friend.uid })),
           owner,
+          txHash
         }),
       });
 
@@ -359,6 +364,8 @@ export function CreateMilestone({ friends, userId }: { friends: Friend[], userId
           setTransactionStep(null);
         }, 3000);
       }
+
+      alert(`Transaction Hash: ${txHash}`);
 
       timeoutRef.current = setTimeout(() => {
         setStatusMessage(null);

@@ -119,7 +119,7 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
           const metadataCid = milestoneDocData?.ipfsCIDs?.metadataCid;
           let ipfsData = {};
           if (metadataCid) {
-            const ipfsUrl = `https://ipfs.io/ipfs/${metadataCid}`;
+            const ipfsUrl = `http://127.0.0.1:8080/ipfs/${metadataCid}`;
             try {
               // Timeout promise for 5 seconds
               const timeoutPromise = new Promise<never>((_, reject) =>
@@ -1305,14 +1305,14 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
                     </div>
                     {milestone.image && (
                       <img
-                        src={
-                          milestone.image.startsWith('http')
-                            ? milestone.image
-                            : `https://ipfs.io/ipfs/${milestone.image}`
-                        }
-                        alt={milestone.description}
-                        className="w-full h-40 object-cover rounded-md mb-2"
-                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                      src={
+                        milestone.image.startsWith('http')
+                        ? milestone.image
+                        : `http://127.0.0.1:8080/ipfs/${milestone.image}`
+                      }
+                      alt={milestone.description}
+                      className="w-full h-40 object-cover rounded-md mb-2"
+                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
                       />
                     )}
                     <p className="text-white text-lg font-medium mb-2 truncate">{milestone.description}</p>
@@ -1368,7 +1368,7 @@ const SharedMilestoneTimeline: React.FC<SharedMilestoneTimelineProps> = ({ userI
                         src={
                           milestone.image.startsWith('http')
                             ? milestone.image
-                            : `https://ipfs.io/ipfs/${milestone.image}`
+                            : `http://127.0.0.1:8080/ipfs/${milestone.image}`
                         }
                         alt={milestone.description}
                         className="w-full h-40 object-cover rounded-md mb-2"

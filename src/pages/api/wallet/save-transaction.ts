@@ -13,11 +13,12 @@ export const POST: APIRoute = async ({ request }) => {
       );
     }
 
+
     const db = getFirestore(app);
     const transactionRef = db.collection("transactions").doc();
     await transactionRef.set({
-      from,
-      to,
+      from: from.toLowerCase(),
+      to: to.toLowerCase(),
       amount: amount.toString(),
       txHash,
       blockNumber,

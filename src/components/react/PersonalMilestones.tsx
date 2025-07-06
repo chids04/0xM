@@ -175,7 +175,7 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
             if (!metadataCid) return null;
 
             // fetch milestone data from ipfs with timeout
-            const ipfsUrl = `https://ipfs.io/ipfs/${metadataCid}`;
+            const ipfsUrl = `http://127.0.0.1:8080/ipfs/${metadataCid}`;
             try {
               const ipfsResponse = await fetchWithTimeout(ipfsUrl, 10000); // 10 second timeout
               
@@ -950,7 +950,7 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
               >
                 {milestone.image && (
                   <img
-                  src={milestone.image?.startsWith("http") ? milestone.image : `https://ipfs.io/ipfs/${milestone.image}`}
+                  src={milestone.image?.startsWith("http") ? milestone.image : `http://127.0.0.1:8080/ipfs/${milestone.image}`}
                     alt={milestone.description}
                     className="w-full h-40 object-cover rounded-md mb-4"
                     onError={(e) => {
@@ -1021,7 +1021,7 @@ const MilestoneTimeline: React.FC<MilestoneTimelineProps> = ({ userId, userName 
               {previewData.milestone.image && (
                 <div className="mt-4 flex justify-center">
                 <img
-                  src={`https://ipfs.io/ipfs/${previewData.milestone.image}`}
+                  src={`http://127.0.0.1:8080/ipfs/${previewData.milestone.image}`}
                   alt="Milestone"
                   className="max-w-full h-auto rounded-lg"
                   style={{ maxHeight: '200px' }}

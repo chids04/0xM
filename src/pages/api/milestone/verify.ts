@@ -134,7 +134,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       );
     }
     
-    const ipfsUrl = `https://ipfs.io/ipfs/${metadataCid}`;
+    const ipfsUrl = `http://127.0.0.1:8080/ipfs/${metadataCid}`;
     const ipfsResponse = await fetch(ipfsUrl);
     if (!ipfsResponse.ok) {
       return new Response(

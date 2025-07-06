@@ -56,14 +56,12 @@ export default function TransactionHistory({ currentUser }: TransactionHistoryPr
         // Create two queries: one for sent transactions and one for received
         const sentQuery = query(
           transactionsRef,
-          where("from", "==", address),
-          orderBy("timestamp", "desc")
+          where("from", "==", address.toLowerCase()),
         );
         
         const receivedQuery = query(
           transactionsRef,
-          where("to", "==", address),
-          orderBy("timestamp", "desc")
+          where("to", "==", address.toLowerCase()),
         );
 
         // Execute both queries
@@ -93,9 +91,9 @@ export default function TransactionHistory({ currentUser }: TransactionHistoryPr
         });
 
         // Sort by timestamp (most recent first)
-        allTransactions.sort((a, b) => 
-          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-        );
+        // allTransactions.sort((a, b) => 
+        //   new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+        // );
 
         setTransactions(allTransactions);
         setLoading(false);
@@ -268,7 +266,7 @@ function TransactionItem({
       
       <div className="w-full sm:w-auto text-left sm:text-right mt-2 sm:mt-0">
         <p className={`font-semibold ${isSent ? "text-red-400" : "text-green-400"}`}>
-          {isSent ? "-" : "+"}{formatAmount(transaction.amount)} MST
+          {isSent ? "-" : "+"}{transaction.amount} MST
         </p>
       </div>
     </div>

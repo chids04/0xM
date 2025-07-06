@@ -1,34 +1,33 @@
-# Astro Starter Kit: Basics
+# 0xM - Blockchain-Powered Milestone Tracking Application
 
-```sh
-npm create astro@latest -- --template basics
-```
+0xM is a full-stack web3 application that combines blockchain technology with a modern web interface to create, track, verify, and share personal and professional milestones. The platform allows users to create verifiable milestones that are stored on the blockchain, mint them as NFTs, and share them with friends or collaborators.
 
-[![Open in StackBlitz](https://developer.stackblitz.com/img/open_in_stackblitz.svg)](https://stackblitz.com/github/withastro/astro/tree/latest/examples/basics)
-[![Open with CodeSandbox](https://assets.codesandbox.io/github/button-edit-lime.svg)](https://codesandbox.io/p/sandbox/github/withastro/astro/tree/latest/examples/basics)
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/withastro/astro?devcontainer_path=.devcontainer/basics/devcontainer.json)
+## 🚀 Project Overview
 
-> 🧑‍🚀 **Seasoned astronaut?** Delete this file. Have fun!
+0xM leverages blockchain technology to provide immutable proof of milestone achievement. Key features include:
 
-![just-the-basics](https://github.com/withastro/astro/assets/2244813/a0a5533c-a856-4198-8470-2d67b1d7c554)
+- **Blockchain-Verified Milestones**: Create personal or group milestones that are stored on the blockchain
+- **NFT Minting**: Turn verified milestones into NFTs that can be displayed or transferred
+- **Cryptographic Verification**: Ensure the integrity of milestones through cryptographic verification
+- **Decentralized Storage**: Store milestone data and images on IPFS for decentralization
+- **Social Features**: Tag friends, collaborate on milestones, and build your achievement network
+- **Custom Wallet Integration**: Seamlessly interact with Ethereum-compatible blockchains
+- **Token Economy**: Use MST tokens to interact with the platform's features
 
-## 🚀 Project Structure
 
-Inside of your Astro project, you'll see the following folders and files:
+## 📁 Project Structure
 
 ```text
 /
-├── public/
-│   └── favicon.svg
-├── src/
-│   ├── layouts/
-│   │   └── Layout.astro
-│   └── pages/
-│       └── index.astro
-└── package.json
+├── blockchain/contracts        # Smart contract code 
+│
+├── src/                        # Application source code
+│   ├── assets/                 # Images and static files
+│   ├── pages/                  # Astro pages
+│   │   ├── api/                # API endpoints
+│   │   └── *.astro             # Page components
+│
 ```
-
-To learn more about the folder structure of an Astro project, refer to [our guide on project structure](https://docs.astro.build/en/basics/project-structure/).
 
 ## 🧞 Commands
 
@@ -38,11 +37,34 @@ All commands are run from the root of the project, from a terminal:
 | :------------------------ | :----------------------------------------------- |
 | `npm install`             | Installs dependencies                            |
 | `npm run dev`             | Starts local dev server at `localhost:4321`      |
-| `npm run build`           | Build your production site to `./dist/`          |
-| `npm run preview`         | Preview your build locally, before deploying     |
-| `npm run astro ...`       | Run CLI commands like `astro add`, `astro check` |
-| `npm run astro -- --help` | Get help using the Astro CLI                     |
+| `node scripts/start-ipfs.js` | Start local IPFS node for development         |
 
-## 👀 Want to learn more?
+## 🌐 Implementation Details
 
-Feel free to check [our documentation](https://docs.astro.build) or jump into our [Discord server](https://astro.build/chat).
+### Smart Contracts
+The blockchain folder contains Solidity smart contracts that handle:
+- Milestone creation and verification
+- NFT minting of verified milestones
+- Token operations for platform economy
+- Gas abstraction for better UX
+
+### Frontend Application
+The src folder contains the web application built with Astro and React that provides:
+- User authentication and profile management
+- Milestone creation with IPFS image storage
+- Social features for collaborative milestones
+- NFT gallery and transfer capabilities
+- Wallet integration for blockchain interactions
+
+### API and Backend
+The application uses Firebase and custom API endpoints to:
+- Store user data securely
+- Handle blockchain transaction creation
+- Manage IPFS interactions
+- Process payments in MST tokens
+
+## 📊 Dependencies
+- IPFS https://github.com/ipfs/kubo
+
+
+
